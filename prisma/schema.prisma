@@ -1,0 +1,205 @@
+// Brain Arena schema — self-hosted Postgres + Prisma.
+//
+// FAIRNESS NOTE: Match.matchSeed is the single shared seed every
+// participant uses to reconstruct the question set. The seed is recorded
+// for replay/audit; the seen-question filter (60-day no-repeat) lives in
+// SeenQuestion, which is per-user and never affects the shared content
+// of a match.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Auth ─────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  profile      Profile?
+  sessions     Session[]
+  matchResults MatchResult[]
+  achievements UserAchievement[]
+  seen         SeenQuestion[]
+  wallet       Wallet?
+  transactions Transaction[]
+
+  @@map("users")
+}
+
+model Session {
+  token     String   @id
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+// ─── Player profile / progression ────────────────────────────────────
+
+model Profile {
+  userId         String   @id
+  username       String   @unique
+  tier           String   @default("Bronze")
+  division       String   @default("IV")
+  lp             Int      @default(0)
+  level          Int      @default(1)
+  xp             Int      @default(0)
+  xpToNext       Int      @default(800)
+  bio            String   @default("")
+  region         String   @default("EU")
+  joinedAt       DateTime @default(now())
+  wins           Int      @default(0)
+  losses         Int      @default(0)
+  bestStreak     Int      @default(0)
+  favoriteGameId String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([lp(sort: Desc)])
+  @@index([wins(sort: Desc)])
+  @@map("profiles")
+}
+
+// ─── Match history ────────────────────────────────────────────────────
+// Match captures the shared, deterministic match metadata. MatchResult
+// captures one row per participant (today: solo player). Real PvP would
+// add a second MatchResult row pointing at the same Match.
+
+model Match {
+  id         String        @id @default(uuid())
+  gameId     String
+  matchSeed  BigInt
+  difficulty String
+  rounds     Int
+  durationMs Int
+  createdAt  DateTime      @default(now())
+  results    MatchResult[]
+
+  @@index([gameId, createdAt(sort: Desc)])
+  @@map("matches")
+}
+
+model MatchResult {
+  id            String   @id @default(uuid())
+  matchId       String
+  match         Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  playerName    String
+  opponentName  String
+  result        String // "win" | "loss" | "draw"
+  scoreSelf     Int
+  scoreOpponent Int
+  lpDelta       Int      @default(0)
+  xpGained      Int      @default(0)
+  createdAt     DateTime @default(now())
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([matchId])
+  @@map("match_results")
+}
+
+// ─── Seasonal leaderboard snapshots ───────────────────────────────────
+// The live leaderboard is a query over Profile. SeasonLeaderboardEntry
+// freezes the standings at season end so historical placements are stable.
+
+model SeasonLeaderboardEntry {
+  id         String   @id @default(uuid())
+  seasonId   String
+  userId     String
+  username   String
+  rank       Int
+  lp         Int
+  wins       Int
+  losses     Int
+  capturedAt DateTime @default(now())
+
+  @@unique([seasonId, userId])
+  @@index([seasonId, rank])
+  @@map("season_leaderboard_entries")
+}
+
+// ─── Achievements ─────────────────────────────────────────────────────
+
+model Achievement {
+  id          String            @id // e.g., "first_blood"
+  title       String
+  description String
+  icon        String
+  rarity      String // "common" | "rare" | "epic" | "legendary"
+  unlocks     UserAchievement[]
+
+  @@map("achievements")
+}
+
+model UserAchievement {
+  userId        String
+  achievementId String
+  unlockedAt    DateTime    @default(now())
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievement   Achievement @relation(fields: [achievementId], references: [id])
+
+  @@id([userId, achievementId])
+  @@index([userId])
+  @@map("user_achievements")
+}
+
+// ─── Anti-repeat (60-day no-repeat) ──────────────────────────────────
+
+model SeenQuestion {
+  userId       String
+  questionHash String
+  seenAt       DateTime @default(now())
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, questionHash])
+  @@index([seenAt])
+  @@map("seen_questions")
+}
+
+// ─── Wallet / transaction PLACEHOLDERS ───────────────────────────────
+// Schema is provisioned for a future Netopia integration (Romanian PSP).
+// No application code references these models yet. Do NOT enable any
+// payment flow until legal/regulatory review is complete.
+
+model Wallet {
+  userId    String   @id
+  balance   Decimal  @default(0) @db.Decimal(12, 2)
+  currency  String   @default("RON")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("wallets")
+}
+
+model Transaction {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount      Decimal  @db.Decimal(12, 2)
+  currency    String   @default("RON")
+  kind        String // "deposit" | "withdrawal" | "fee" | "adjustment"
+  status      String   @default("pending") // "pending" | "completed" | "failed"
+  externalRef String? // future Netopia reference id
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([status])
+  @@map("transactions")
+}

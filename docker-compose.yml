@@ -1,0 +1,46 @@
+# Brain Arena local dev stack: Postgres + the app.
+#
+#   docker compose up --build       # boots both
+#   docker compose exec app npm run db:migrate:dev   # apply schema
+#   docker compose down -v          # drop everything
+#
+# In production you typically run only the app container and point
+# DATABASE_URL at a managed / dedicated Postgres instance (or a separate
+# self-hosted DB host) — see DEPLOY.md.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: brainarena
+      POSTGRES_PASSWORD: brainarena
+      POSTGRES_DB: brainarena
+    ports:
+      - "5432:5432"
+    volumes:
+      - brain-arena-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U brainarena -d brainarena"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://brainarena:brainarena@db:5432/brainarena}
+      # Set PUBLIC_ORIGIN in your `.env` file (next to docker-compose.yml)
+      # to whatever public URL fronts the app — required in production.
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:3000}
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: ${PORT:-3000}
+    ports:
+      - "${APP_PORT:-3000}:3000"
+
+volumes:
+  brain-arena-db:

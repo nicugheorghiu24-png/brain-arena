@@ -1,0 +1,204 @@
+@import "tailwindcss";
+
+:root {
+  --background: #050510;
+  --foreground: #ededed;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+}
+
+/* ---------------- Animations ---------------- */
+
+@keyframes ba-shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes ba-gradient {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+@keyframes ba-pulse-ring {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+@keyframes ba-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes ba-fade-up {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ba-slide-in-right {
+  0% {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes ba-spin-slow {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-shimmer {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+.animate-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(34, 211, 238, 0.18),
+    transparent
+  );
+  animation: ba-shimmer 1.6s linear infinite;
+  z-index: 0;
+}
+
+.animate-gradient {
+  background-size: 200% 200%;
+  animation: ba-gradient 8s ease infinite;
+}
+
+.animate-pulse-ring {
+  animation: ba-pulse-ring 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+}
+
+.animate-float {
+  animation: ba-float 3.5s ease-in-out infinite;
+}
+
+.animate-spin-slow {
+  animation: ba-spin-slow 14s linear infinite;
+}
+
+.page-enter {
+  animation: ba-fade-up 350ms ease-out both;
+}
+
+.toast-enter {
+  animation: ba-slide-in-right 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* ---------------- Glassmorphism ---------------- */
+
+.glass {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.glass-cyan {
+  background: rgba(34, 211, 238, 0.06);
+  border: 1px solid rgba(34, 211, 238, 0.22);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* ---------------- Animated app background ---------------- */
+
+.app-aurora {
+  position: relative;
+}
+.app-aurora::before {
+  content: "";
+  position: absolute;
+  inset: -10%;
+  background:
+    radial-gradient(40% 40% at 20% 10%, rgba(34, 211, 238, 0.18), transparent 60%),
+    radial-gradient(35% 35% at 80% 30%, rgba(168, 85, 247, 0.14), transparent 60%),
+    radial-gradient(50% 50% at 50% 100%, rgba(14, 165, 233, 0.18), transparent 60%);
+  filter: blur(40px);
+  animation: ba-gradient 14s ease-in-out infinite;
+  pointer-events: none;
+  z-index: 0;
+}
+.app-aurora > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* ---------------- Scrollbar ---------------- */
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(34, 211, 238, 0.25);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(34, 211, 238, 0.45);
+}
+
+/* ---------------- Reduced motion ---------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-shimmer::after,
+  .animate-gradient,
+  .animate-pulse-ring,
+  .animate-float,
+  .animate-spin-slow,
+  .page-enter,
+  .toast-enter,
+  .app-aurora::before {
+    animation: none !important;
+  }
+}

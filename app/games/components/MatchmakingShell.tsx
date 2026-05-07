@@ -1,0 +1,158 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { io, Socket } from "socket.io-client";
+import { Avatar } from "../../components/ui/Avatar";
+import { TierBadge } from "../../components/ui/TierBadge";
+import { useToast } from "../../components/ui/Toast";
+import { getGame } from "../registry";
+
+type Props = {
+  gameId: string;
+  redirectTo?: string;
+  cancelHref?: string;
+};
+
+export function MatchmakingShell({
+  gameId,
+  redirectTo = "/arena",
+  cancelHref = "/dashboard",
+}: Props) {
+  const router = useRouter();
+  const toast = useToast();
+  const [status, setStatus] = useState("Connecting...");
+  const [opponent, setOpponent] = useState<string | null>(null);
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const socketRef = useRef<Socket | null>(null);
+  const userRef = useRef<any>(null);
+
+  const meta = getGame(gameId);
+
+  useEffect(() => {
+    let socket: Socket | null = null;
+
+    async function initialize() {
+      const response = await fetch("/api/auth/me");
+      const data = await response.json();
+      const user = data?.user;
+
+      if (!user) {
+        toast.push({ type: "error", title: "Not authenticated" });
+        router.push("/login");
+        return;
+      }
+      userRef.current = user;
+
+      socket = io();
+      socketRef.current = socket;
+
+      socket.on("connect", () => {
+        setStatus("Joining queue...");
+        socket?.emit("join_queue", {
+          gameId,
+          userId: user.id,
+          username: user.username,
+        });
+      });
+
+      socket.on("queued", (data) => {
+        setStatus(`In queue (position: ${data.position})`);
+      });
+
+      socket.on("queue_error", (data: { reason: string }) => {
+        toast.push({
+          type: "error",
+          title: "Matchmaking error",
+          description: data.reason,
+        });
+        setStatus(data.reason);
+      });
+
+      socket.on("match_found", (data) => {
+        setStatus("Match found!");
+        setOpponent(data.opponent.username);
+        router.push(`${redirectTo}?matchId=${data.matchId}&seed=${data.seed}`);
+      });
+
+      socket.on("countdown", (count) => {
+        setCountdown(count);
+        setStatus(`Starting in ${count}...`);
+      });
+
+      socket.on("match_start", () => {
+        setStatus("Match starting!");
+      });
+
+      socket.on("disconnect", () => {
+        setStatus("Disconnected");
+      });
+    }
+
+    initialize();
+
+    return () => {
+      socket?.disconnect();
+      socketRef.current = null;
+    };
+  }, [gameId, router, toast, redirectTo]);
+
+  function cancel() {
+    if (socketRef.current) {
+      socketRef.current.emit("leave_queue");
+    }
+    toast.push({ type: "info", title: "Left queue" });
+    router.push(cancelHref);
+  }
+
+  return (
+    <main className="page-enter app-aurora flex min-h-[calc(100vh-4rem)] items-center justify-center bg-gradient-to-br from-black via-slate-950 to-cyan-950 px-4 py-12 text-white">
+      <div className="w-full max-w-xl space-y-8">
+        <div className="rounded-3xl border border-cyan-400/30 bg-gradient-to-br from-cyan-500/10 via-slate-900 to-black p-8 text-center shadow-[0_0_80px_-30px_rgba(34,211,238,0.7)] backdrop-blur sm:p-10">
+          {meta && (
+            <div className="mb-4 inline-flex rounded-full border border-cyan-400/40 bg-black/40 px-3 py-1 text-xs uppercase tracking-widest text-cyan-300">
+              {meta.mode}
+            </div>
+          )}
+          <div className="relative mx-auto flex h-44 w-44 items-center justify-center sm:h-56 sm:w-56">
+            <span className="absolute inline-flex h-full w-full rounded-full border-2 border-cyan-400/40 animate-pulse-ring" />
+            <span
+              className="absolute inline-flex h-full w-full rounded-full border-2 border-cyan-400/30 animate-pulse-ring"
+              style={{ animationDelay: "0.6s" }}
+            />
+            <span
+              className="absolute inline-flex h-full w-full rounded-full border-2 border-cyan-400/20 animate-pulse-ring"
+              style={{ animationDelay: "1.2s" }}
+            />
+            <div className="relative z-10 flex h-full w-full items-center justify-center rounded-full bg-gradient-to-br from-cyan-500/20 to-slate-900/80">
+              <div className="text-center">
+                <div className="text-2xl font-bold text-cyan-400 sm:text-3xl">
+                  {countdown !== null ? countdown : "?"}
+                </div>
+                <div className="mt-1 text-xs text-cyan-300/80 sm:text-sm">
+                  {status}
+                </div>
+              </div>
+            </div>
+          </div>
+          {opponent && (
+            <div className="mt-6 text-center">
+              <div className="text-sm text-cyan-300/80">vs</div>
+              <div className="mt-2 text-lg font-semibold text-white">
+                {opponent}
+              </div>
+            </div>
+          )}
+          <div className="mt-8 flex justify-center">
+            <button
+              onClick={cancel}
+              className="rounded-full border border-red-400/50 bg-red-500/10 px-6 py-2 text-sm font-medium text-red-400 transition-colors hover:bg-red-500/20"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    </main>
+  );
+}
