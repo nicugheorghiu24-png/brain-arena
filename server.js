@@ -1,5 +1,18 @@
 const { createServer } = require("http");
 const { parse } = require("url");
+const path = require("path");
+
+// Load .env files BEFORE requiring anything that reads process.env.
+// `next start` does this automatically; our custom server doesn't, so
+// without this the shell has to remember to `export $(cat .env | xargs)`
+// before starting — which has caused stale-env bugs in production
+// (cookie Secure flag stayed on after .env was edited because the
+// shell's exported PUBLIC_ORIGIN was never refreshed). @next/env is a
+// transitive dep of next; it loads in the same order Next.js itself
+// uses (.env.{NODE_ENV}.local → .env.local → .env.{NODE_ENV} → .env).
+const { loadEnvConfig } = require("@next/env");
+loadEnvConfig(path.resolve(__dirname));
+
 const next = require("next");
 
 const dev = process.env.NODE_ENV !== "production";
