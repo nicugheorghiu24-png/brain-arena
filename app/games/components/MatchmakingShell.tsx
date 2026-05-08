@@ -33,7 +33,9 @@ export function MatchmakingShell({
     let socket: Socket | null = null;
 
     async function initialize() {
-      const response = await fetch("/api/auth/me");
+      const response = await fetch("/api/auth/me", {
+        credentials: "include",
+      });
       const data = await response.json();
       const user = data?.user;
 
@@ -44,7 +46,7 @@ export function MatchmakingShell({
       }
       userRef.current = user;
 
-      socket = io();
+      socket = io({ withCredentials: true });
       socketRef.current = socket;
 
       socket.on("connect", () => {

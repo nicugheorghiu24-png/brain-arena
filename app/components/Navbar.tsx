@@ -27,29 +27,44 @@ export default function Navbar() {
   const user = useSyncExternalStore(subscribeUser, getUser, getServerUser);
   const [open, setOpen] = useState(false);
 
-  // Rehydrate fakeAuth from the server session on mount. Fixes the case
-  // where localStorage was cleared but the ba_session cookie is still
-  // valid — without this, the UI shows "logged out" even though the
-  // server would happily authenticate.
+  // Reconcile fakeAuth (localStorage display state) with the real
+  // server session on mount. Two directions:
+  //   1. Server has a valid session, localStorage doesn't → rehydrate.
+  //   2. Server says no auth, localStorage has a stale user → clear it.
+  // Without (2) the navbar shows "Hi, X" while every API call returns
+  // 401, e.g. when the cookie was issued with Secure on an HTTP origin.
+  // Network errors / 5xx responses leave the local state alone so a
+  // transient outage doesn't appear to log the user out.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
+      let res: Response;
       try {
-        const res = await fetch("/api/auth/me", { credentials: "include" });
-        if (!res.ok) return;
-        const data = (await res.json()) as {
-          user: { id: string; email: string; username: string } | null;
-        };
-        if (cancelled) return;
-        if (data.user && getUser()?.id !== data.user.id) {
+        res = await fetch("/api/auth/me", { credentials: "include" });
+      } catch {
+        return; // network error — keep local state
+      }
+      if (cancelled) return;
+      if (!res.ok) return; // 5xx — keep local state
+      let data: { user: { id: string; email: string; username: string } | null };
+      try {
+        data = await res.json();
+      } catch {
+        return;
+      }
+      if (cancelled) return;
+      if (data.user) {
+        if (getUser()?.id !== data.user.id) {
           signIn({
             id: data.user.id,
             email: data.user.email,
             username: data.user.username,
           });
         }
-      } catch {
-        // ignore — offline or no API
+      } else if (getUser()) {
+        // Server explicitly says no authenticated user. Drop the stale
+        // localStorage so navbar + protected routes agree.
+        signOut();
       }
     })();
     return () => {

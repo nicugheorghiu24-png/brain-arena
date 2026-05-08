@@ -228,7 +228,9 @@ function ChessMatch({
     let cancelled = false;
 
     async function initialize() {
-      const response = await fetch("/api/auth/me").catch(() => null);
+      const response = await fetch("/api/auth/me", {
+        credentials: "include",
+      }).catch(() => null);
       if (cancelled) return;
       const data = response ? await response.json().catch(() => ({})) : {};
       const currentUser = data?.user;
@@ -248,7 +250,13 @@ function ChessMatch({
         };
 
       setUser(sessionUser);
-      socket = io({ reconnectionAttempts: 5, reconnectionDelay: 1000 });
+      // withCredentials: send the ba_session cookie on the WS handshake
+      // so the server-side io.use(...) middleware can authenticate.
+      socket = io({
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000,
+        withCredentials: true,
+      });
       socketRef.current = socket;
 
       socket.on("connect", () => {
