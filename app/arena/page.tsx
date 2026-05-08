@@ -35,7 +35,7 @@ import {
 import {
   generateDeterministicQuestionSet,
 } from "../games/match";
-import { db } from "../lib/db";
+import { recordSoloMatchOutcome } from "../lib/matchClient";
 
 type Selection = { index: number; correct: boolean } | null;
 
@@ -157,30 +157,30 @@ function ArenaInner() {
       });
       const userId = getCurrentUserId();
       if (!userId) return;
-      await db.profiles.ensureForUser({
-        userId,
-        username,
-        email: user?.email,
-      });
-      await db.matches.record({
-        gameId: GAME_ID,
-        matchSeed: Number(matchSeed),
-        difficulty,
-        playerId: userId,
-        playerName: username,
-        opponentName: OPPONENT_NAME,
-        result,
-        scoreSelf: score.self,
-        scoreOpponent: score.opponent,
-        durationMs,
-        rounds: TOTAL,
-        lpDelta: computed.lpDelta,
-        xpGained: computed.xpGained,
-      });
-      await db.profiles.applyMatchOutcome(userId, {
-        result,
-        lpDelta: computed.lpDelta,
-        xpGained: computed.xpGained,
+      const recorded = await recordSoloMatchOutcome(
+        {
+          gameId: GAME_ID,
+          difficulty,
+          rounds: TOTAL,
+          durationMs,
+          result,
+          scoreSelf: score.self,
+          scoreOpponent: score.opponent,
+          opponentName: OPPONENT_NAME,
+          matchSeed: Number(matchSeed),
+        },
+        {
+          userId,
+          username,
+          email: user?.email,
+          optimisticLpDelta: computed.lpDelta,
+          optimisticXpGained: computed.xpGained,
+        },
+      );
+      setReward({
+        lpDelta: recorded.reward.lpDelta,
+        xpGained: recorded.reward.xpGained,
+        levelUp: false,
       });
     }, 0);
     return () => clearTimeout(id);

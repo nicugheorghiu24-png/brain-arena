@@ -19,6 +19,44 @@ function applyXp(profile: Profile, xpGained: number) {
   return { xp, level, xpToNext };
 }
 
+/**
+ * Tier/division thresholds. Mirrors `rankingsService.updatePlayerRank`
+ * so chess (Elo path) and solo games (fixed-LP path) end up at the same
+ * tier for the same LP. Single source of truth lives here so it can be
+ * called from a transaction without a second round-trip.
+ */
+export function tierForLp(lp: number): { tier: string; division: string } {
+  if (lp >= 2000) return { tier: "Master", division: "I" };
+  if (lp >= 1500) {
+    return {
+      tier: "Diamond",
+      division: lp >= 1800 ? "I" : lp >= 1650 ? "II" : "III",
+    };
+  }
+  if (lp >= 1200) {
+    return {
+      tier: "Platinum",
+      division: lp >= 1350 ? "I" : lp >= 1275 ? "II" : "III",
+    };
+  }
+  if (lp >= 900) {
+    return {
+      tier: "Gold",
+      division: lp >= 1050 ? "I" : lp >= 975 ? "II" : "III",
+    };
+  }
+  if (lp >= 600) {
+    return {
+      tier: "Silver",
+      division: lp >= 750 ? "I" : lp >= 675 ? "II" : "III",
+    };
+  }
+  return {
+    tier: "Bronze",
+    division: lp >= 300 ? "I" : lp >= 150 ? "II" : "III",
+  };
+}
+
 export const profilesService = {
   async getByUserId(userId: string) {
     const prisma = requirePrisma();
@@ -46,15 +84,17 @@ export const profilesService = {
     const prisma = requirePrisma();
     return prisma.$transaction(async (tx) => {
       const profile = await tx.profile.findUnique({ where: { userId } });
-      if (!profile) return;
+      if (!profile) return null;
       const lp = Math.max(0, profile.lp + outcome.lpDelta);
       const wins = profile.wins + (outcome.result === "win" ? 1 : 0);
       const losses = profile.losses + (outcome.result === "loss" ? 1 : 0);
       const xpFields = applyXp(profile, outcome.xpGained);
-      await tx.profile.update({
+      const { tier, division } = tierForLp(lp);
+      const updated = await tx.profile.update({
         where: { userId },
-        data: { lp, wins, losses, ...xpFields },
+        data: { lp, wins, losses, tier, division, ...xpFields },
       });
+      return updated;
     });
   },
 };

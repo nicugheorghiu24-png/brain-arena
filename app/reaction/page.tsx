@@ -19,7 +19,7 @@ import { getGame } from "../games/registry";
 import type { RewardSummary } from "../games/types";
 import { createMatchSeed } from "../games/match";
 import { getCurrentUserId } from "../games/questions";
-import { db } from "../lib/db";
+import { recordSoloMatchOutcome } from "../lib/matchClient";
 
 const GAME_ID = "reaction";
 const TOTAL_ROUNDS = 5;
@@ -170,30 +170,30 @@ export default function ReactionPage() {
       });
       const userId = getCurrentUserId();
       if (!userId) return;
-      await db.profiles.ensureForUser({
-        userId,
-        username,
-        email: user?.email,
-      });
-      await db.matches.record({
-        gameId: GAME_ID,
-        matchSeed,
-        difficulty: "medium",
-        playerId: userId,
-        playerName: username,
-        opponentName: OPPONENT_NAME,
-        result,
-        scoreSelf: score.self,
-        scoreOpponent: score.opponent,
-        durationMs,
-        rounds: TOTAL_ROUNDS,
-        lpDelta: computed.lpDelta,
-        xpGained: computed.xpGained,
-      });
-      await db.profiles.applyMatchOutcome(userId, {
-        result,
-        lpDelta: computed.lpDelta,
-        xpGained: computed.xpGained,
+      const recorded = await recordSoloMatchOutcome(
+        {
+          gameId: GAME_ID,
+          difficulty: "medium",
+          rounds: TOTAL_ROUNDS,
+          durationMs,
+          result,
+          scoreSelf: score.self,
+          scoreOpponent: score.opponent,
+          opponentName: OPPONENT_NAME,
+          matchSeed,
+        },
+        {
+          userId,
+          username,
+          email: user?.email,
+          optimisticLpDelta: computed.lpDelta,
+          optimisticXpGained: computed.xpGained,
+        },
+      );
+      setReward({
+        lpDelta: recorded.reward.lpDelta,
+        xpGained: recorded.reward.xpGained,
+        levelUp: false,
       });
     }, 0);
     return () => clearTimeout(id);

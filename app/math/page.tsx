@@ -27,7 +27,7 @@ import {
   createMatchSeed,
   generateMatchQuestionSetForUser,
 } from "../games/match";
-import { db } from "../lib/db";
+import { recordSoloMatchOutcome } from "../lib/matchClient";
 
 const GAME_ID = "math";
 const SPRINT_SECONDS = 60;
@@ -181,30 +181,31 @@ export default function MathPage() {
       });
       const userId = getCurrentUserId();
       if (!userId) return;
-      await db.profiles.ensureForUser({
-        userId,
-        username,
-        email: user?.email,
-      });
-      await db.matches.record({
-        gameId: GAME_ID,
-        matchSeed,
-        difficulty,
-        playerId: userId,
-        playerName: username,
-        opponentName: OPPONENT_NAME,
-        result,
-        scoreSelf: score.self,
-        scoreOpponent: score.opponent,
-        durationMs,
-        rounds: SPRINT_SECONDS,
-        lpDelta: computed.lpDelta,
-        xpGained: computed.xpGained,
-      });
-      await db.profiles.applyMatchOutcome(userId, {
-        result,
-        lpDelta: computed.lpDelta,
-        xpGained: computed.xpGained,
+      const recorded = await recordSoloMatchOutcome(
+        {
+          gameId: GAME_ID,
+          difficulty,
+          rounds: SPRINT_SECONDS,
+          durationMs,
+          result,
+          scoreSelf: score.self,
+          scoreOpponent: score.opponent,
+          opponentName: OPPONENT_NAME,
+          matchSeed,
+        },
+        {
+          userId,
+          username,
+          email: user?.email,
+          optimisticLpDelta: computed.lpDelta,
+          optimisticXpGained: computed.xpGained,
+        },
+      );
+      // Reconcile displayed reward with what the server actually applied.
+      setReward({
+        lpDelta: recorded.reward.lpDelta,
+        xpGained: recorded.reward.xpGained,
+        levelUp: false,
       });
     }, 0);
     return () => clearTimeout(id);
