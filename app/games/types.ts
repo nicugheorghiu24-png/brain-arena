@@ -18,6 +18,13 @@ export type GameMeta = {
   routePath: string;
   defaultDifficulty?: Difficulty;
   matchMode?: MatchMode;
+  /**
+   * What the player will face in this game. "ai" = solo vs deterministic
+   * bot (still ranked); "pvp" = real human matchmaking via Socket.IO.
+   * Used to set honest expectations on the games hub and the result
+   * screen.
+   */
+  opponent?: "ai" | "pvp";
 };
 
 export type GamePhase = "intro" | "playing" | "result";
