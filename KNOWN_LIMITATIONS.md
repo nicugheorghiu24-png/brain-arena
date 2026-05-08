@@ -41,15 +41,13 @@ are tracked here so we don't ship marketing claims that overpromise.
 
 ## Auth / sessions
 
-- **`fakeAuth` shadows real auth on the client.** `Navbar` reads from
-  `fakeAuth` for the username display; on mount it now resyncs from
-  `/api/auth/me` so a stale localStorage state recovers within one
-  paint. The dual store is still a sharp edge — long-term we want a
-  single source of truth.
 - **No password reset flow.** Lost passwords currently require a manual
   database edit.
 - **No email verification.** Signup grants an active account
   immediately.
+- **Multi-tab logout drift.** If a user logs out in tab A, tab B still
+  shows them logged in until the next reload or any 401 from a
+  protected API. Acceptable for closed beta.
 
 ## Solo games (Logic Quiz, Memory, Reaction, Math Sprint)
 
@@ -106,6 +104,10 @@ are tracked here so we don't ship marketing claims that overpromise.
 - **HTTP rate limiter is per-process.** Won't aggregate across replicas.
   Not an issue for the single-VPS beta deploy. Map is best-effort
   GC'd every 60 s.
+- **`.env` is process-cached.** `server.js` loads `.env` once at boot
+  via `@next/env`. After editing `.env`, restart the app
+  (`systemctl restart brain-arena.service` or `bash scripts/deploy.sh`)
+  for changes to take effect.
 - **No CDN / static asset caching.** Next handles default caching but
   there is no edge layer in front of the app container.
 - **`middleware.ts` deprecation warning.** Next 16 prefers `proxy.ts`;

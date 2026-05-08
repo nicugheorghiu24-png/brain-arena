@@ -1,11 +1,90 @@
 # Brain Arena — Production Deployment Guide
 
 End-to-end recipe for taking Brain Arena from `git clone` to a live
-private beta on a single VPS, fronted by Cloudflare for HTTPS and DDoS.
-Every step has been verified against the current code.
+private beta on a single VPS. Two supported shapes:
 
-For the broader system overview see `ARCHITECTURE.md`.
-For go-live tracking, see `BETA_LAUNCH_CHECKLIST.md`.
+- **Bare-metal + nginx + Let's Encrypt** (what `playbrainarena.com` runs
+  on). Two scripts, no Docker.
+- **Docker Compose + Cloudflare in front** (alternative). See §0 below.
+
+For the broader system overview see `ARCHITECTURE.md`. For go-live
+tracking, see `BETA_LAUNCH_CHECKLIST.md`.
+
+---
+
+## Quick recipe — bare-metal first deploy
+
+Once-only. Replaces every "manual ssh + nine commands" exchange with
+two scripts that live in the repo.
+
+```bash
+# On the VPS, as root
+cd ~
+git clone https://github.com/<owner>/brain-arena.git
+cd brain-arena
+
+# Create .env (DATABASE_URL, PUBLIC_ORIGIN). For the FIRST deploy you
+# can set PUBLIC_ORIGIN=http://<your-domain> — setup-https.sh below
+# will flip it to https once the cert is issued.
+cp .env.example .env
+$EDITOR .env
+
+# 1. First-time HTTPS + systemd setup. Installs nginx + certbot, gets a
+#    Let's Encrypt cert, drops a brain-arena.service systemd unit,
+#    flips PUBLIC_ORIGIN to https, restarts the app via systemd.
+sudo LE_EMAIL=you@example.com bash scripts/setup-https.sh
+
+# 2. Day-to-day deploys after that. Pulls main, npm ci, prisma generate,
+#    next build, restarts via the detected process manager (pm2 →
+#    systemd → nohup), smoke-checks the cookie + /login redirect.
+bash scripts/deploy.sh
+```
+
+That's it. The systemd unit (`scripts/brain-arena.service`) means the
+process survives ssh disconnect, OOM kills, and reboots. The certbot
+timer auto-renews the TLS cert.
+
+### What the scripts protect against
+
+`scripts/deploy.sh` aborts loudly (and leaves the old build running)
+on any of:
+
+- not on `main`, dirty working tree, `.env` missing, `.env` accidentally
+  committed
+- `git pull --ff-only` would diverge
+- `npm ci` produced a build that's missing `/api/matches`,
+  `/api/leaderboard`, `/api/auth/me`
+- `:3000` still bound after kill
+- `Set-Cookie` flag mismatched with `PUBLIC_ORIGIN` protocol
+  (https://… expects Secure, http://… must NOT have Secure)
+- `/login` doesn't redirect authenticated users
+
+### Process management
+
+Three modes auto-detected, in order of preference:
+
+1. **PM2** — if `pm2 list` shows a `brain-arena` process, deploy.sh
+   uses `pm2 restart brain-arena --update-env`. Run `pm2 save` and
+   `pm2 startup` once to make PM2 itself survive reboots.
+2. **systemd** — if `/etc/systemd/system/brain-arena.service` exists
+   (installed by `setup-https.sh`), deploy.sh uses
+   `systemctl restart brain-arena.service`. Auto-restarts on crash,
+   survives reboots, journalctl logs.
+3. **nohup** — fallback only. `nohup env NODE_ENV=production npm start`
+   into `/var/log/brain-arena/app-<timestamp>.log`. Survives ssh
+   disconnect but NOT reboots; not recommended past first deploy.
+
+### `.env` loading
+
+`server.js` calls `@next/env`'s `loadEnvConfig()` at boot. The same
+loader Next.js uses internally for `next start`. So:
+
+- The process loads `.env` itself; you do **not** need
+  `export $(cat .env | xargs)` before starting.
+- Editing `.env` requires a process restart to take effect (env is
+  cached at boot, like every Next deploy in existence).
+- Order: `.env.production.local` → `.env.local` → `.env.production`
+  → `.env`. First match wins per variable.
 
 ---
 
