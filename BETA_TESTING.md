@@ -5,13 +5,19 @@ to expect, and how to report issues.
 
 ## What's in the beta
 
-- **Game Hub** at `/games` listing five duels: Logic 1v1, Memory Match,
-  Reaction Duel, Math Sprint, and Chess Arena.
+- **Game Hub** at `/games` listing five experiences: Logic Quiz,
+  Memory Match, Reaction Duel, and Math Sprint (all vs deterministic AI),
+  plus Chess Arena (real-time human PvP).
 - **Real-time multiplayer chess** with server-authoritative validation,
   5+5 time control, draw offers, resignation, rematches, and
   spectator mode.
-- **Ranked progression**: per-account LP (Elo, K=32), tier/division
-  promotion (Bronze → Master), live leaderboard at `/leaderboard`.
+- **Server-authoritative match recording.** All five games persist to
+  Postgres via `POST /api/matches` (or the chess Socket.IO end-of-match
+  flow). LP / XP / level / tier are computed server-side; the client
+  cannot self-award progression.
+- **Ranked progression**: per-account LP (Elo for chess, fixed-delta
+  for solo), tier/division promotion (Bronze → Master), live
+  leaderboard at `/leaderboard` reading from `/api/leaderboard`.
 - **Account system**: email + password signup, sessions persisted to
   Postgres, dashboard with match history.
 
@@ -88,11 +94,18 @@ to expect, and how to report issues.
 - [ ] Open `/chess?matchId=does-not-exist`: shows "Match unavailable"
       with a "Find another match" CTA.
 
-### S9 — Other games
-- [ ] Logic 1v1 (`/arena`): both players see the same 5 questions in
-      the same order. The opponent is currently a deterministic bot.
+### S9 — Solo games (vs AI)
+All four are solo against a deterministic AI opponent; the result still
+counts toward your LP / XP / leaderboard.
+- [ ] Logic Quiz (`/arena`): you see 5 questions in a deterministic
+      order based on the match seed. Bot answers with a configured
+      accuracy.
 - [ ] Memory Match, Reaction Duel, Math Sprint render and complete
       without crashes.
+- [ ] After each game ends: open `/dashboard` and confirm Match
+      History shows the game with non-zero LP delta. Open in
+      incognito → log in → confirm history is the **same** (proves
+      it's persisted to Postgres, not browser localStorage).
 
 ### S10 — Account
 - [ ] Logout from the navbar; refresh; you should land on `/` not the

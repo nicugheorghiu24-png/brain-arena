@@ -42,17 +42,34 @@ are tracked here so we don't ship marketing claims that overpromise.
 ## Auth / sessions
 
 - **`fakeAuth` shadows real auth on the client.** `Navbar` reads from
-  `fakeAuth`; `/api/auth/me` reads from the real session cookie. After
-  a hard refresh they can disagree until the client resyncs. We
-  reconcile on the next render but the seam exists.
-- **Socket.IO trusts the client's `userId`.** The Socket.IO server
-  authenticates by the `userId` the client sends in `join_queue` /
-  `join_match`. Hardening to a verified session token is a
-  pre-launch follow-up.
+  `fakeAuth` for the username display; on mount it now resyncs from
+  `/api/auth/me` so a stale localStorage state recovers within one
+  paint. The dual store is still a sharp edge — long-term we want a
+  single source of truth.
 - **No password reset flow.** Lost passwords currently require a manual
   database edit.
 - **No email verification.** Signup grants an active account
   immediately.
+
+## Solo games (Logic Quiz, Memory, Reaction, Math Sprint)
+
+- **Opponent is a deterministic AI.** All four are framed as duels but
+  pit the player against a server-deterministic bot. Copy on the games
+  hub now says "vs AI" so this isn't a surprise.
+- **Server-authoritative scoring.** Match outcomes flow through
+  `POST /api/matches`, which validates the body, recomputes
+  `lpDelta`/`xpGained` from `computeReward(...)`, and persists via
+  Prisma. The client cannot self-award LP.
+- **Sanity bounds, not replay.** Validation caps `scoreSelf`/`scoreOpponent`
+  at 200, `rounds` at 200, `durationMs` between 500 ms and 15 min. We
+  do **not** replay the player's input stream against the seed yet —
+  someone who tampers with their client and submits a plausible-looking
+  outcome can still gain LP. A match-replay validator is queued
+  post-launch.
+- **localStorage fallback for anonymous play.** If the user hasn't
+  signed up, the match is stored in `localStorage` only. Server
+  endpoints return 401 in that case and `recordSoloMatchOutcome`
+  falls back transparently.
 
 ## Anti-cheat
 
@@ -84,8 +101,11 @@ are tracked here so we don't ship marketing claims that overpromise.
 
 - **No metrics endpoint.** Health beyond "the HTTP server responds" is
   not exposed.
-- **No rate limit on socket events.** The HTTP layer has a 10 req/min
-  middleware; the Socket.IO layer does not.
+- **No rate limit on socket events.** The HTTP layer has a 60 req/min
+  middleware (per-IP, per-process); the Socket.IO layer does not.
+- **HTTP rate limiter is per-process.** Won't aggregate across replicas.
+  Not an issue for the single-VPS beta deploy. Map is best-effort
+  GC'd every 60 s.
 - **No CDN / static asset caching.** Next handles default caching but
   there is no edge layer in front of the app container.
 - **`middleware.ts` deprecation warning.** Next 16 prefers `proxy.ts`;
