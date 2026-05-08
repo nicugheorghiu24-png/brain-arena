@@ -54,11 +54,18 @@ if ! grep -q '^PUBLIC_ORIGIN=' .env; then
   fatal "PUBLIC_ORIGIN is not set in .env (e.g. https://playbrainarena.com)"
 fi
 
-log "3. preflight: working tree clean (would block fast-forward pull)"
-if [ -n "$(git status --porcelain)" ]; then
-  echo "Working tree has changes:"
+log "3. preflight: no MODIFIED tracked files (would block fast-forward pull)"
+# Untracked files (?? prefix) are fine — they don't block a ff pull and
+# we don't want to bail on stuff like a stray swap file or an app.log.
+# We only care about modifications to files git is already tracking.
+if ! git diff --quiet || ! git diff --cached --quiet; then
+  echo "Tracked files have local changes:"
   git status --short
   fatal "commit, stash, or 'git checkout -- <file>' before redeploying"
+fi
+if [ -n "$(git status --porcelain | grep '^??' || true)" ]; then
+  echo "Note: untracked files present (will not block deploy):"
+  git status --short | grep '^??' | head -5
 fi
 
 if [ -z "${SKIP_PULL:-}" ]; then
