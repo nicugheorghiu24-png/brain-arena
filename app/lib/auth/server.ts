@@ -52,12 +52,41 @@ export type CurrentUser = {
   username: string;
 };
 
+export type CurrentUserWithProfile = CurrentUser & {
+  profile: {
+    tier: string;
+    division: string;
+    lp: number;
+    level: number;
+    xp: number;
+    xpToNext: number;
+    wins: number;
+    losses: number;
+    bestStreak: number;
+    region: string;
+    bio: string;
+    joinedAt: string;
+    favoriteGameId: string | null;
+  };
+};
+
 /**
  * Resolve the current authenticated user from the session cookie.
  * Returns null when the request is anonymous, the session is expired,
  * or the database is not configured.
  */
 export async function getCurrentUser(): Promise<CurrentUser | null> {
+  const full = await getCurrentUserWithProfile();
+  if (!full) return null;
+  return { id: full.id, email: full.email, username: full.username };
+}
+
+/**
+ * Same as getCurrentUser but returns the profile fields too. Used by
+ * /api/auth/me so the dashboard can render real progression in one
+ * round-trip instead of a follow-up profile fetch.
+ */
+export async function getCurrentUserWithProfile(): Promise<CurrentUserWithProfile | null> {
   if (!isDbConfigured()) return null;
   const c = await cookies();
   const token = c.get(SESSION_COOKIE)?.value;
@@ -73,10 +102,26 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
     return null;
   }
   if (!session.user.profile) return null;
+  const p = session.user.profile;
   return {
     id: session.user.id,
     email: session.user.email,
-    username: session.user.profile.username,
+    username: p.username,
+    profile: {
+      tier: p.tier,
+      division: p.division,
+      lp: p.lp,
+      level: p.level,
+      xp: p.xp,
+      xpToNext: p.xpToNext,
+      wins: p.wins,
+      losses: p.losses,
+      bestStreak: p.bestStreak,
+      region: p.region,
+      bio: p.bio,
+      joinedAt: p.joinedAt.toISOString(),
+      favoriteGameId: p.favoriteGameId,
+    },
   };
 }
 

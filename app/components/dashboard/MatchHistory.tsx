@@ -7,8 +7,23 @@ import {
   subscribeUser,
 } from "../../lib/fakeAuth";
 import { FAKE_MATCH_HISTORY } from "../../lib/fakeData";
-import { db, type MatchRecord } from "../../lib/db";
 import { listGames } from "../../games/registry";
+
+type ApiMatch = {
+  id: string;
+  gameId: string;
+  difficulty: string;
+  rounds: number;
+  durationMs: number;
+  playerName: string;
+  opponentName: string;
+  result: "win" | "loss" | "draw";
+  scoreSelf: number;
+  scoreOpponent: number;
+  lpDelta: number;
+  xpGained: number;
+  createdAt: string;
+};
 
 type Row = {
   id: string;
@@ -32,7 +47,7 @@ function timeAgo(ms: number): string {
   return `${days} days ago`;
 }
 
-function fromRecord(m: MatchRecord): Row {
+function fromApi(m: ApiMatch): Row {
   const meta = listGames().find((g) => g.id === m.gameId);
   return {
     id: m.id,
@@ -41,7 +56,7 @@ function fromRecord(m: MatchRecord): Row {
     result: m.result === "win" ? "W" : m.result === "draw" ? "D" : "L",
     scoreText: `${m.scoreSelf}-${m.scoreOpponent}`,
     delta: m.lpDelta,
-    when: timeAgo(m.createdAt),
+    when: timeAgo(new Date(m.createdAt).getTime()),
   };
 }
 
@@ -57,7 +72,7 @@ const FALLBACK: Row[] = FAKE_MATCH_HISTORY.map((m) => ({
 
 export default function MatchHistory() {
   const viewer = useSyncExternalStore(subscribeUser, getUser, getServerUser);
-  const userId = viewer?.email ?? null;
+  const userKey = viewer?.email ?? null;
 
   const [rows, setRows] = useState<Row[]>(FALLBACK);
   const [usingReal, setUsingReal] = useState(false);
@@ -65,13 +80,34 @@ export default function MatchHistory() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      if (!userId) return;
-      const real = await db.matches.listForUser(userId, 5);
-      if (cancelled) return;
-      if (real.length > 0) {
-        setRows(real.map(fromRecord));
-        setUsingReal(true);
-      } else {
+      if (!userKey) {
+        setRows(FALLBACK);
+        setUsingReal(false);
+        return;
+      }
+      try {
+        const res = await fetch("/api/matches?limit=5", {
+          credentials: "include",
+        });
+        if (!res.ok) {
+          setRows(FALLBACK);
+          setUsingReal(false);
+          return;
+        }
+        const data = (await res.json()) as {
+          ok: boolean;
+          matches: ApiMatch[];
+        };
+        if (cancelled) return;
+        if (data.matches.length > 0) {
+          setRows(data.matches.map(fromApi));
+          setUsingReal(true);
+        } else {
+          setRows(FALLBACK);
+          setUsingReal(false);
+        }
+      } catch {
+        if (cancelled) return;
         setRows(FALLBACK);
         setUsingReal(false);
       }
@@ -79,7 +115,7 @@ export default function MatchHistory() {
     return () => {
       cancelled = true;
     };
-  }, [userId]);
+  }, [userKey]);
 
   return (
     <div className="rounded-2xl border border-white/10 bg-white/5 p-6">

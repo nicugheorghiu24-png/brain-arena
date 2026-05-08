@@ -1,19 +1,34 @@
-type Stat = { label: string; value: string; tone?: "good" | "bad" | "muted" };
-
-const stats: Stat[] = [
-  { label: "Wins", value: "127", tone: "good" },
-  { label: "Losses", value: "43", tone: "bad" },
-  { label: "Win Rate", value: "74%", tone: "good" },
-  { label: "Best Streak", value: "12", tone: "muted" },
-];
-
-const toneClass: Record<NonNullable<Stat["tone"]>, string> = {
-  good: "text-emerald-300",
-  bad: "text-rose-300",
-  muted: "text-cyan-200",
+type Props = {
+  wins: number;
+  losses: number;
+  bestStreak: number;
 };
 
-export default function PlayerStats() {
+export default function PlayerStats({ wins, losses, bestStreak }: Props) {
+  const total = wins + losses;
+  const winRatePct = total > 0 ? Math.round((wins / total) * 100) : 0;
+
+  const stats = [
+    { label: "Wins", value: wins.toString(), tone: "good" as const },
+    { label: "Losses", value: losses.toString(), tone: "bad" as const },
+    {
+      label: "Win Rate",
+      value: total > 0 ? `${winRatePct}%` : "—",
+      tone: total > 0 && winRatePct >= 50 ? ("good" as const) : ("muted" as const),
+    },
+    {
+      label: "Best Streak",
+      value: bestStreak.toString(),
+      tone: "muted" as const,
+    },
+  ];
+
+  const toneClass = {
+    good: "text-emerald-300",
+    bad: "text-rose-300",
+    muted: "text-cyan-200",
+  };
+
   return (
     <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
       {stats.map((s) => (
@@ -24,11 +39,7 @@ export default function PlayerStats() {
           <div className="text-xs uppercase tracking-widest text-gray-400">
             {s.label}
           </div>
-          <div
-            className={`mt-2 text-3xl font-bold ${
-              toneClass[s.tone ?? "muted"]
-            }`}
-          >
+          <div className={`mt-2 text-3xl font-bold ${toneClass[s.tone]}`}>
             {s.value}
           </div>
         </div>

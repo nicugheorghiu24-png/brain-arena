@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import {
   getServerUser,
   getUser,
@@ -15,8 +15,58 @@ import LeaderboardPreview from "../components/dashboard/LeaderboardPreview";
 import { XPCard } from "../components/dashboard/XPCard";
 import { AchievementsTeaser } from "../components/dashboard/AchievementsTeaser";
 
+type DashboardProfile = {
+  tier: string;
+  division: string;
+  lp: number;
+  level: number;
+  xp: number;
+  xpToNext: number;
+  wins: number;
+  losses: number;
+  bestStreak: number;
+};
+
+const FALLBACK_PROFILE: DashboardProfile = {
+  tier: DEFAULT_PROFILE.tier,
+  division: DEFAULT_PROFILE.division,
+  lp: 0,
+  level: 1,
+  xp: 0,
+  xpToNext: 800,
+  wins: 0,
+  losses: 0,
+  bestStreak: 0,
+};
+
 export default function DashboardPage() {
   const user = useSyncExternalStore(subscribeUser, getUser, getServerUser);
+  const [profile, setProfile] = useState<DashboardProfile>(FALLBACK_PROFILE);
+  const [hasReal, setHasReal] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const res = await fetch("/api/auth/me", { credentials: "include" });
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          user: { profile?: DashboardProfile } | null;
+        };
+        if (cancelled) return;
+        if (data.user?.profile) {
+          setProfile(data.user.profile);
+          setHasReal(true);
+        }
+      } catch {
+        // ignore — keep fallback
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.email]);
 
   const displayName =
     user?.username ?? user?.email?.split("@")[0] ?? DEFAULT_PROFILE.username;
@@ -33,7 +83,9 @@ export default function DashboardPage() {
               {displayName}
             </h1>
             <p className="mt-2 text-sm text-gray-400">
-              Pregătit pentru următoarea arenă?
+              {hasReal
+                ? "Pregătit pentru următoarea arenă?"
+                : "Sign in to see your real progression."}
             </p>
           </div>
           <div className="flex w-full flex-col gap-2 sm:w-72">
@@ -56,17 +108,25 @@ export default function DashboardPage() {
           </div>
         </header>
 
-        <PlayerStats />
+        <PlayerStats
+          wins={profile.wins}
+          losses={profile.losses}
+          bestStreak={profile.bestStreak}
+        />
 
         <XPCard
-          level={DEFAULT_PROFILE.level}
-          xp={DEFAULT_PROFILE.xp}
-          xpToNext={DEFAULT_PROFILE.xpToNext}
+          level={profile.level}
+          xp={profile.xp}
+          xpToNext={profile.xpToNext}
         />
 
         <div className="grid gap-6 lg:grid-cols-3">
           <div className="lg:col-span-1">
-            <RankCard />
+            <RankCard
+              tier={profile.tier}
+              division={profile.division}
+              lp={profile.lp}
+            />
           </div>
           <div className="lg:col-span-2">
             <MatchHistory />
