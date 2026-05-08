@@ -1,9 +1,74 @@
 import { Server as HTTPServer } from "http";
+import { randomBytes } from "node:crypto";
 import { Server as SocketIOServer, Socket } from "socket.io";
 import { Chess } from "chess.js";
-import { requirePrisma } from "./prisma";
+import { isDbConfigured, requirePrisma } from "./prisma";
 import { rankingsService } from "./services/rankings";
 import { achievementsService } from "./services/achievements";
+
+/**
+ * Cryptographically random 53-bit BigInt for shared match seeds. We cap
+ * at MAX_SAFE_INTEGER so the seed survives a JS-number round-trip (the
+ * client uses the seed in deterministic question generation that runs
+ * on Number, not BigInt). 53 bits is plenty against pre-computation
+ * attacks on the question set.
+ */
+function generateMatchSeed(): bigint {
+  // 6 bytes = 48 bits, fits comfortably in a JS Number for client-side
+  // deterministic question generation. 48 bits = 2^48 distinct seeds is
+  // ample (≈281 trillion). Avoids BigInt literals so this compiles
+  // against ES2017 target.
+  const buf = randomBytes(6);
+  const SHIFT = BigInt(8);
+  let n = BigInt(0);
+  for (const b of buf) n = (n << SHIFT) | BigInt(b);
+  return n;
+}
+
+// Match the cookie name set by app/lib/auth/server.ts. Kept inline to
+// avoid a server-only import chain (this module is loaded by server.js).
+const SESSION_COOKIE = "ba_session";
+
+type SocketAuth = { userId: string; username: string };
+
+function parseCookieHeader(header: string | undefined): Record<string, string> {
+  if (!header) return {};
+  const out: Record<string, string> = {};
+  for (const part of header.split(";")) {
+    const idx = part.indexOf("=");
+    if (idx <= 0) continue;
+    const k = part.slice(0, idx).trim();
+    const v = part.slice(idx + 1).trim();
+    if (!k) continue;
+    out[k] = decodeURIComponent(v);
+  }
+  return out;
+}
+
+async function authFromCookie(
+  cookieHeader: string | undefined,
+): Promise<SocketAuth | null> {
+  if (!isDbConfigured()) return null;
+  const cookies = parseCookieHeader(cookieHeader);
+  const token = cookies[SESSION_COOKIE];
+  if (!token) return null;
+  try {
+    const prisma = requirePrisma();
+    const session = await prisma.session.findUnique({
+      where: { token },
+      include: { user: { include: { profile: true } } },
+    });
+    if (!session) return null;
+    if (session.expiresAt.getTime() < Date.now()) return null;
+    if (!session.user.profile) return null;
+    return {
+      userId: session.user.id,
+      username: session.user.profile.username,
+    };
+  } catch {
+    return null;
+  }
+}
 
 export type MatchmakingPlayer = {
   socketId: string;
@@ -224,7 +289,7 @@ class MatchmakingQueue {
     const player2 = gameQueue.shift()!;
 
     const matchId = `match_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const seed = BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER));
+    const seed = generateMatchSeed();
 
     const match: Match = {
       id: matchId,
@@ -568,13 +633,16 @@ class MatchmakingQueue {
         blackResult as "win" | "loss" | "draw",
       );
 
+      // Sync the MatchResult rows with what the ranking service actually
+      // applied (Elo delta + per-result XP). Without this, the match
+      // history would show the placeholder values written above.
       await prisma.matchResult.updateMany({
         where: { matchId: match.id, userId: white.userId },
-        data: { lpDelta: whiteRank.lpDelta },
+        data: { lpDelta: whiteRank.lpDelta, xpGained: whiteRank.xpGained },
       });
       await prisma.matchResult.updateMany({
         where: { matchId: match.id, userId: black.userId },
-        data: { lpDelta: blackRank.lpDelta },
+        data: { lpDelta: blackRank.lpDelta, xpGained: blackRank.xpGained },
       });
     }
 
@@ -669,7 +737,7 @@ class MatchmakingQueue {
 
   private async createRematch(match: Match) {
     const newMatchId = `rematch_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const seed = BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER));
+    const seed = generateMatchSeed();
     const newMatch: Match = {
       id: newMatchId,
       gameId: match.gameId,
@@ -944,33 +1012,39 @@ export function initSocketIO(server: HTTPServer) {
     },
   });
 
-  io.on("connection", (socket) => {
-    console.log(`Player connected: ${socket.id}`);
+  // Handshake auth. Read ba_session from the upgrade request, validate
+  // against the session table, and bind a server-trusted identity onto
+  // the socket. Spectators (no session) are allowed to connect but are
+  // restricted to spectate-only operations.
+  io.use(async (socket, next) => {
+    const auth = await authFromCookie(socket.handshake.headers.cookie);
+    socket.data.auth = auth; // null = anonymous spectator
+    next();
+  });
 
-    socket.on("join_queue", (data: { gameId: string; userId: string; username: string }) => {
-      // Light input validation. The socket is authenticated only by the
-      // userId the client claims; production should bind the socket to
-      // a real session cookie, but we at least sanity-check shape here.
-      if (
-        !data ||
-        typeof data.gameId !== "string" ||
-        typeof data.userId !== "string" ||
-        typeof data.username !== "string" ||
-        data.userId.length === 0
-      ) {
+  io.on("connection", (socket) => {
+    const auth: SocketAuth | null = socket.data.auth ?? null;
+    console.log(
+      `Player connected: ${socket.id} ${auth ? `(user=${auth.username})` : "(anon)"}`,
+    );
+
+    socket.on("join_queue", (data: { gameId: string }) => {
+      if (!auth) {
+        socket.emit("queue_error", { reason: "Not authenticated." });
+        return;
+      }
+      if (!data || typeof data.gameId !== "string" || !data.gameId) {
         socket.emit("queue_error", { reason: "Invalid payload." });
         return;
       }
-
       const player: MatchmakingPlayer = {
         socketId: socket.id,
-        userId: data.userId,
-        username: data.username,
+        userId: auth.userId,
+        username: auth.username,
         gameId: data.gameId,
         joinedAt: new Date(),
         ready: false,
       };
-
       const result = matchmakingQueue.addPlayer(player);
       if (!result.ok) {
         socket.emit("queue_error", { reason: result.reason });
@@ -987,24 +1061,62 @@ export function initSocketIO(server: HTTPServer) {
       matchmakingQueue.setPlayerReady(socket.id, true);
     });
 
-    socket.on("join_match", (data: { matchId: string; userId: string; username: string; spectate?: boolean }) => {
-      matchmakingQueue.joinMatch(socket, data);
+    socket.on(
+      "join_match",
+      (data: { matchId: string; spectate?: boolean }) => {
+        if (!data || typeof data.matchId !== "string") return;
+        // Spectators allowed without auth; players must be authenticated.
+        if (!auth && !data.spectate) {
+          socket.emit("match_not_found", { matchId: data.matchId });
+          return;
+        }
+        matchmakingQueue.joinMatch(socket, {
+          matchId: data.matchId,
+          userId: auth?.userId ?? `spectator_${socket.id}`,
+          username: auth?.username ?? "Spectator",
+          spectate: data.spectate,
+        });
+      },
+    );
+
+    socket.on(
+      "make_move",
+      (data: {
+        matchId: string;
+        from: string;
+        to: string;
+        promotion?: string;
+      }) => {
+        if (!auth) {
+          socket.emit("move_rejected", { message: "Not authenticated." });
+          return;
+        }
+        matchmakingQueue.handlePlayerMove(socket, data);
+      },
+    );
+
+    socket.on("offer_draw", (data: { matchId: string }) => {
+      if (!auth) return;
+      matchmakingQueue.handleDrawOffer(socket, {
+        matchId: data.matchId,
+        userId: auth.userId,
+      });
     });
 
-    socket.on("make_move", (data: { matchId: string; from: string; to: string; promotion?: string }) => {
-      matchmakingQueue.handlePlayerMove(socket, data);
+    socket.on("resign", (data: { matchId: string }) => {
+      if (!auth) return;
+      matchmakingQueue.handleResign(socket, {
+        matchId: data.matchId,
+        userId: auth.userId,
+      });
     });
 
-    socket.on("offer_draw", (data: { matchId: string; userId: string }) => {
-      matchmakingQueue.handleDrawOffer(socket, data);
-    });
-
-    socket.on("resign", (data: { matchId: string; userId: string }) => {
-      matchmakingQueue.handleResign(socket, data);
-    });
-
-    socket.on("request_rematch", (data: { matchId: string; userId: string }) => {
-      matchmakingQueue.handleRematchRequest(socket, data);
+    socket.on("request_rematch", (data: { matchId: string }) => {
+      if (!auth) return;
+      matchmakingQueue.handleRematchRequest(socket, {
+        matchId: data.matchId,
+        userId: auth.userId,
+      });
     });
 
     socket.on("disconnect", () => {
