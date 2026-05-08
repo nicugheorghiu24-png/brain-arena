@@ -4,6 +4,7 @@ import { Fragment, Suspense, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation";
 import { io, Socket } from "socket.io-client";
 import { ChessBoard } from "./components/ChessBoard";
+import { useAuth } from "../components/AuthProvider";
 import { useToast } from "../components/ui/Toast";
 
 type CurrentUser = {
@@ -171,6 +172,7 @@ function ChessMatch({
 }) {
   const router = useRouter();
   const toast = useToast();
+  const { user: authUser } = useAuth();
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [matchState, setMatchState] = useState<MatchState | null>(null);
   const [phase, setPhase] = useState<ConnectionPhase>("connecting");
@@ -228,26 +230,27 @@ function ChessMatch({
     let cancelled = false;
 
     async function initialize() {
-      const response = await fetch("/api/auth/me", {
-        credentials: "include",
-      }).catch(() => null);
-      if (cancelled) return;
-      const data = response ? await response.json().catch(() => ({})) : {};
-      const currentUser = data?.user;
-
-      if (!currentUser && !spectate) {
+      // Auth comes from the AuthProvider context, not a per-page fetch.
+      // The provider already reconciles with /api/auth/me on mount, so
+      // by the time this effect runs we have the authoritative answer.
+      if (!authUser && !spectate) {
         toast.push({ type: "error", title: "Please log in to continue." });
         router.push("/login");
         return;
       }
 
-      // Spectators don't need a real account; we synthesize a guest id.
-      const sessionUser: CurrentUser =
-        currentUser ?? {
-          id: `guest_${Math.random().toString(36).slice(2, 10)}`,
-          username: "Spectator",
-          email: "",
-        };
+      // Spectators don't need a real account; synthesize a guest id.
+      const sessionUser: CurrentUser = authUser
+        ? {
+            id: authUser.id,
+            username: authUser.username,
+            email: authUser.email,
+          }
+        : {
+            id: `guest_${Math.random().toString(36).slice(2, 10)}`,
+            username: "Spectator",
+            email: "",
+          };
 
       setUser(sessionUser);
       // withCredentials: send the ba_session cookie on the WS handshake
@@ -342,7 +345,7 @@ function ChessMatch({
       socket?.disconnect();
       socketRef.current = null;
     };
-  }, [matchId, router, toast, spectate]);
+  }, [matchId, router, toast, spectate, authUser]);
 
   // Tick the local clock every 200ms while either the disconnect grace
   // timer or the chess move clock is running. Both countdowns are

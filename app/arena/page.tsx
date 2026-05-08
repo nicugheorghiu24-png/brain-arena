@@ -6,14 +6,9 @@ import {
   useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
 } from "react";
 import { useSearchParams } from "next/navigation";
-import {
-  getServerUser,
-  getUser,
-  subscribeUser,
-} from "../lib/fakeAuth";
+import { useAuth } from "../components/AuthProvider";
 import { DEFAULT_PROFILE } from "../lib/fakeData";
 import { useToast } from "../components/ui/Toast";
 import { GameLayout } from "../games/components/GameLayout";
@@ -28,7 +23,7 @@ import { computeReward } from "../games/reward";
 import { getGame } from "../games/registry";
 import type { RewardSummary } from "../games/types";
 import {
-  getCurrentUserId,
+  resolveSeenUserId,
   markQuestionsAsSeen,
   type Question,
 } from "../games/questions";
@@ -54,7 +49,7 @@ function ArenaInner() {
   }, [searchParams]);
 
   const toast = useToast();
-  const user = useSyncExternalStore(subscribeUser, getUser, getServerUser);
+  const { user } = useAuth();
   const username =
     user?.username ?? user?.email?.split("@")[0] ?? DEFAULT_PROFILE.username;
 
@@ -79,7 +74,7 @@ function ArenaInner() {
     if (phase !== "playing") return;
     if (questions.length > 0) return;
     const id = setTimeout(() => {
-      const userId = getCurrentUserId();
+      const userId = resolveSeenUserId(user);
       const set = generateDeterministicQuestionSet(
         GAME_ID,
         TOTAL,
@@ -90,7 +85,7 @@ function ArenaInner() {
       markQuestionsAsSeen(userId, set);
     }, 0);
     return () => clearTimeout(id);
-  }, [phase, questions.length, difficulty, matchSeed]);
+  }, [phase, questions.length, difficulty, matchSeed, user]);
 
   const question = questions[questionIdx];
   const ready = question !== undefined;
@@ -155,7 +150,7 @@ function ArenaInner() {
           result === "win" ? "Victory" : result === "draw" ? "Draw" : "Defeat",
         description: `${score.self} – ${score.opponent} vs ${OPPONENT_NAME}`,
       });
-      const userId = getCurrentUserId();
+      const userId = resolveSeenUserId(user);
       if (!userId) return;
       const recorded = await recordSoloMatchOutcome(
         {
@@ -191,7 +186,7 @@ function ArenaInner() {
     startedAt,
     toast,
     username,
-    user?.email,
+    user,
     matchSeed,
     difficulty,
   ]);

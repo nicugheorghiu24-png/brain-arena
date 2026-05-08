@@ -1,11 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import {
-  getServerUser,
-  getUser,
-  subscribeUser,
-} from "../lib/fakeAuth";
+import { useEffect, useRef, useState } from "react";
+import { useAuth } from "../components/AuthProvider";
 import { DEFAULT_PROFILE } from "../lib/fakeData";
 import { useToast } from "../components/ui/Toast";
 import { GameLayout } from "../games/components/GameLayout";
@@ -18,7 +14,7 @@ import { computeReward } from "../games/reward";
 import { getGame } from "../games/registry";
 import type { RewardSummary } from "../games/types";
 import { createMatchSeed } from "../games/match";
-import { getCurrentUserId } from "../games/questions";
+import { resolveSeenUserId } from "../games/questions";
 import { recordSoloMatchOutcome } from "../lib/matchClient";
 
 const GAME_ID = "reaction";
@@ -38,7 +34,7 @@ type RoundResult = "you" | "opp" | "draw" | "false-start";
 
 export default function ReactionPage() {
   const toast = useToast();
-  const user = useSyncExternalStore(subscribeUser, getUser, getServerUser);
+  const { user } = useAuth();
   const username =
     user?.username ?? user?.email?.split("@")[0] ?? DEFAULT_PROFILE.username;
 
@@ -168,7 +164,7 @@ export default function ReactionPage() {
           result === "win" ? "Victory" : result === "draw" ? "Draw" : "Defeat",
         description: `${score.self} – ${score.opponent} rounds vs ${OPPONENT_NAME}`,
       });
-      const userId = getCurrentUserId();
+      const userId = resolveSeenUserId(user);
       if (!userId) return;
       const recorded = await recordSoloMatchOutcome(
         {
@@ -204,7 +200,7 @@ export default function ReactionPage() {
     startedAt,
     toast,
     username,
-    user?.email,
+    user,
     matchSeed,
   ]);
 

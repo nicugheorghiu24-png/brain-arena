@@ -12,7 +12,7 @@ export { getQuestionHash } from "./hash";
 export { mulberry32, seedFromString, randInt, shuffle } from "./rng";
 
 export {
-  getCurrentUserId,
+  resolveSeenUserId,
   getSeenQuestions,
   markQuestionsAsSeen,
   filterRecentlySeenQuestions,

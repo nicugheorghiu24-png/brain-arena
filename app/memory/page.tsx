@@ -1,11 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import {
-  getServerUser,
-  getUser,
-  subscribeUser,
-} from "../lib/fakeAuth";
+import { useEffect, useRef, useState } from "react";
+import { useAuth } from "../components/AuthProvider";
 import { DEFAULT_PROFILE } from "../lib/fakeData";
 import { useToast } from "../components/ui/Toast";
 import { GameLayout } from "../games/components/GameLayout";
@@ -19,7 +15,7 @@ import { getGame } from "../games/registry";
 import type { RewardSummary } from "../games/types";
 import { MemoryCard } from "../components/games/memory/MemoryCard";
 import { createMatchSeed } from "../games/match";
-import { getCurrentUserId } from "../games/questions";
+import { resolveSeenUserId } from "../games/questions";
 import { recordSoloMatchOutcome } from "../lib/matchClient";
 
 const GAME_ID = "memory";
@@ -106,7 +102,7 @@ function pickRandomTwo(
 
 export default function MemoryPage() {
   const toast = useToast();
-  const user = useSyncExternalStore(subscribeUser, getUser, getServerUser);
+  const { user } = useAuth();
   const username =
     user?.username ?? user?.email?.split("@")[0] ?? DEFAULT_PROFILE.username;
 
@@ -278,7 +274,7 @@ export default function MemoryPage() {
           result === "win" ? "Victory" : result === "draw" ? "Draw" : "Defeat",
         description: `${score.self} – ${score.opponent} pairs vs ${OPPONENT_NAME}`,
       });
-      const userId = getCurrentUserId();
+      const userId = resolveSeenUserId(user);
       if (!userId) return;
       const recorded = await recordSoloMatchOutcome(
         {
@@ -314,7 +310,7 @@ export default function MemoryPage() {
     startedAt,
     toast,
     username,
-    user?.email,
+    user,
     matchSeed,
   ]);
 

@@ -2,23 +2,31 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
-import { signInWithEmail } from "../lib/auth";
+import { useEffect, useState } from "react";
+import { useAuth } from "../components/AuthProvider";
 import { useToast } from "../components/ui/Toast";
 
 export default function LoginPage() {
   const router = useRouter();
   const toast = useToast();
+  const { user, signIn } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // Already authenticated → bounce to dashboard. Runs on mount and on
+  // any re-render where `user` flips to non-null (e.g. logged in via a
+  // different tab). router.replace so /login isn't on the back stack.
+  useEffect(() => {
+    if (user) router.replace("/dashboard");
+  }, [user, router]);
+
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
-    const result = await signInWithEmail(email, password);
+    const result = await signIn(email, password);
     if (!result.ok) {
       setError(result.reason);
       setSubmitting(false);
@@ -29,7 +37,17 @@ export default function LoginPage() {
       title: "Welcome back",
       description: email,
     });
-    router.push("/dashboard");
+    router.replace("/dashboard");
+  }
+
+  // While we have a user, don't flash the form before the redirect
+  // settles. Show a minimal placeholder that matches the layout height.
+  if (user) {
+    return (
+      <main className="page-enter app-aurora flex min-h-[calc(100vh-4rem)] items-center justify-center bg-gradient-to-br from-black via-slate-950 to-cyan-950 px-6 py-12">
+        <p className="text-sm text-gray-400">Already signed in — redirecting…</p>
+      </main>
+    );
   }
 
   return (

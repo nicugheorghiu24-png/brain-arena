@@ -1,12 +1,8 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import {
-  getServerUser,
-  getUser,
-  subscribeUser,
-} from "../../lib/fakeAuth";
+import { useAuth } from "../AuthProvider";
 import {
   FAKE_ACHIEVEMENTS,
   FAKE_LEADERBOARD,
@@ -106,11 +102,7 @@ function TabButton({
 }
 
 export function ProfileView({ username }: Props) {
-  const viewer = useSyncExternalStore(
-    subscribeUser,
-    getUser,
-    getServerUser,
-  );
+  const { user: viewer } = useAuth();
   const viewerName =
     viewer?.username ?? viewer?.email?.split("@")[0] ?? null;
   const isOwn = viewerName?.toLowerCase() === username.toLowerCase();

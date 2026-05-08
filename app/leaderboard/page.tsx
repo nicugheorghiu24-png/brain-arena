@@ -1,12 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import {
-  getServerUser,
-  getUser,
-  subscribeUser,
-} from "../lib/fakeAuth";
+import { useAuth } from "../components/AuthProvider";
 import { TierBadge } from "../components/ui/TierBadge";
 import { Avatar } from "../components/ui/Avatar";
 import { FAKE_LEADERBOARD } from "../lib/fakeData";
@@ -34,7 +30,7 @@ const FALLBACK_ROWS: LeaderboardRow[] = FAKE_LEADERBOARD.map((r) => ({
 }));
 
 export default function LeaderboardPage() {
-  const viewer = useSyncExternalStore(subscribeUser, getUser, getServerUser);
+  const { user: viewer } = useAuth();
 
   const [region, setRegion] = useState<Region>("All");
   const [sort, setSort] = useState<LeaderboardSort>("mmr");

@@ -1,11 +1,7 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
-import {
-  getServerUser,
-  getUser,
-  subscribeUser,
-} from "../../lib/fakeAuth";
+import { useEffect, useState } from "react";
+import { useAuth } from "../AuthProvider";
 import { FAKE_MATCH_HISTORY } from "../../lib/fakeData";
 import { listGames } from "../../games/registry";
 
@@ -71,8 +67,8 @@ const FALLBACK: Row[] = FAKE_MATCH_HISTORY.map((m) => ({
 }));
 
 export default function MatchHistory() {
-  const viewer = useSyncExternalStore(subscribeUser, getUser, getServerUser);
-  const userKey = viewer?.email ?? null;
+  const { user } = useAuth();
+  const userKey = user?.id ?? null;
 
   const [rows, setRows] = useState<Row[]>(FALLBACK);
   const [usingReal, setUsingReal] = useState(false);

@@ -1,12 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, useSyncExternalStore } from "react";
-import {
-  getServerUser,
-  getUser,
-  subscribeUser,
-} from "../lib/fakeAuth";
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { useAuth } from "../components/AuthProvider";
 import { DEFAULT_PROFILE } from "../lib/fakeData";
 import PlayerStats from "../components/dashboard/PlayerStats";
 import RankCard from "../components/dashboard/RankCard";
@@ -15,19 +12,7 @@ import LeaderboardPreview from "../components/dashboard/LeaderboardPreview";
 import { XPCard } from "../components/dashboard/XPCard";
 import { AchievementsTeaser } from "../components/dashboard/AchievementsTeaser";
 
-type DashboardProfile = {
-  tier: string;
-  division: string;
-  lp: number;
-  level: number;
-  xp: number;
-  xpToNext: number;
-  wins: number;
-  losses: number;
-  bestStreak: number;
-};
-
-const FALLBACK_PROFILE: DashboardProfile = {
+const FALLBACK_PROFILE = {
   tier: DEFAULT_PROFILE.tier,
   division: DEFAULT_PROFILE.division,
   lp: 0,
@@ -40,36 +25,24 @@ const FALLBACK_PROFILE: DashboardProfile = {
 };
 
 export default function DashboardPage() {
-  const user = useSyncExternalStore(subscribeUser, getUser, getServerUser);
-  const [profile, setProfile] = useState<DashboardProfile>(FALLBACK_PROFILE);
-  const [hasReal, setHasReal] = useState(false);
+  const router = useRouter();
+  const { user } = useAuth();
 
+  // The dashboard requires auth — bounce anonymous viewers to /login.
   useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        const res = await fetch("/api/auth/me", { credentials: "include" });
-        if (!res.ok) return;
-        const data = (await res.json()) as {
-          user: { profile?: DashboardProfile } | null;
-        };
-        if (cancelled) return;
-        if (data.user?.profile) {
-          setProfile(data.user.profile);
-          setHasReal(true);
-        }
-      } catch {
-        // ignore — keep fallback
-      }
-    }
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [user?.email]);
+    if (!user) router.replace("/login");
+  }, [user, router]);
 
-  const displayName =
-    user?.username ?? user?.email?.split("@")[0] ?? DEFAULT_PROFILE.username;
+  if (!user) {
+    return (
+      <main className="page-enter app-aurora flex min-h-[calc(100vh-4rem)] items-center justify-center bg-gradient-to-br from-black via-slate-950 to-cyan-950 px-6 py-12 text-white">
+        <p className="text-sm text-gray-400">Redirecting to login…</p>
+      </main>
+    );
+  }
+
+  const profile = user.profile ?? FALLBACK_PROFILE;
+  const displayName = user.username;
 
   return (
     <main className="page-enter app-aurora min-h-[calc(100vh-4rem)] bg-gradient-to-br from-black via-slate-950 to-cyan-950 px-4 py-8 text-white sm:px-6 sm:py-10">
@@ -77,15 +50,13 @@ export default function DashboardPage() {
         <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-xs uppercase tracking-widest text-cyan-300/70">
-              {user ? "Welcome back" : "Welcome"}
+              Welcome back
             </p>
             <h1 className="mt-1 text-4xl font-extrabold md:text-5xl">
               {displayName}
             </h1>
             <p className="mt-2 text-sm text-gray-400">
-              {hasReal
-                ? "Pregătit pentru următoarea arenă?"
-                : "Sign in to see your real progression."}
+              Pregătit pentru următoarea arenă?
             </p>
           </div>
           <div className="flex w-full flex-col gap-2 sm:w-72">

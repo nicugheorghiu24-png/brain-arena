@@ -6,6 +6,7 @@ import { io, Socket } from "socket.io-client";
 import { Avatar } from "../../components/ui/Avatar";
 import { TierBadge } from "../../components/ui/TierBadge";
 import { useToast } from "../../components/ui/Toast";
+import { useAuth } from "../../components/AuthProvider";
 import { getGame } from "../registry";
 
 type Props = {
@@ -21,83 +22,67 @@ export function MatchmakingShell({
 }: Props) {
   const router = useRouter();
   const toast = useToast();
+  const { user } = useAuth();
   const [status, setStatus] = useState("Connecting...");
   const [opponent, setOpponent] = useState<string | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
   const socketRef = useRef<Socket | null>(null);
-  const userRef = useRef<any>(null);
 
   const meta = getGame(gameId);
 
   useEffect(() => {
-    let socket: Socket | null = null;
-
-    async function initialize() {
-      const response = await fetch("/api/auth/me", {
-        credentials: "include",
-      });
-      const data = await response.json();
-      const user = data?.user;
-
-      if (!user) {
-        toast.push({ type: "error", title: "Not authenticated" });
-        router.push("/login");
-        return;
-      }
-      userRef.current = user;
-
-      socket = io({ withCredentials: true });
-      socketRef.current = socket;
-
-      socket.on("connect", () => {
-        setStatus("Joining queue...");
-        socket?.emit("join_queue", {
-          gameId,
-          userId: user.id,
-          username: user.username,
-        });
-      });
-
-      socket.on("queued", (data) => {
-        setStatus(`In queue (position: ${data.position})`);
-      });
-
-      socket.on("queue_error", (data: { reason: string }) => {
-        toast.push({
-          type: "error",
-          title: "Matchmaking error",
-          description: data.reason,
-        });
-        setStatus(data.reason);
-      });
-
-      socket.on("match_found", (data) => {
-        setStatus("Match found!");
-        setOpponent(data.opponent.username);
-        router.push(`${redirectTo}?matchId=${data.matchId}&seed=${data.seed}`);
-      });
-
-      socket.on("countdown", (count) => {
-        setCountdown(count);
-        setStatus(`Starting in ${count}...`);
-      });
-
-      socket.on("match_start", () => {
-        setStatus("Match starting!");
-      });
-
-      socket.on("disconnect", () => {
-        setStatus("Disconnected");
-      });
+    if (!user) {
+      toast.push({ type: "error", title: "Not authenticated" });
+      router.push("/login");
+      return;
     }
 
-    initialize();
+    let socket: Socket | null = null;
+    socket = io({ withCredentials: true });
+    socketRef.current = socket;
+
+    socket.on("connect", () => {
+      setStatus("Joining queue...");
+      socket?.emit("join_queue", { gameId });
+    });
+
+    socket.on("queued", (data) => {
+      setStatus(`In queue (position: ${data.position})`);
+    });
+
+    socket.on("queue_error", (data: { reason: string }) => {
+      toast.push({
+        type: "error",
+        title: "Matchmaking error",
+        description: data.reason,
+      });
+      setStatus(data.reason);
+    });
+
+    socket.on("match_found", (data) => {
+      setStatus("Match found!");
+      setOpponent(data.opponent.username);
+      router.push(`${redirectTo}?matchId=${data.matchId}&seed=${data.seed}`);
+    });
+
+    socket.on("countdown", (count) => {
+      setCountdown(count);
+      setStatus(`Starting in ${count}...`);
+    });
+
+    socket.on("match_start", () => {
+      setStatus("Match starting!");
+    });
+
+    socket.on("disconnect", () => {
+      setStatus("Disconnected");
+    });
 
     return () => {
       socket?.disconnect();
       socketRef.current = null;
     };
-  }, [gameId, router, toast, redirectTo]);
+  }, [gameId, router, toast, redirectTo, user]);
 
   function cancel() {
     if (socketRef.current) {

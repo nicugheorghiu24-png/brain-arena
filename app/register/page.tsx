@@ -2,19 +2,24 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
-import { signUpWithEmail } from "../lib/auth";
+import { useEffect, useState } from "react";
+import { useAuth } from "../components/AuthProvider";
 import { useToast } from "../components/ui/Toast";
 
 export default function RegisterPage() {
   const router = useRouter();
   const toast = useToast();
+  const { user, signUp } = useAuth();
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (user) router.replace("/dashboard");
+  }, [user, router]);
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -24,7 +29,7 @@ export default function RegisterPage() {
       return;
     }
     setSubmitting(true);
-    const result = await signUpWithEmail({
+    const result = await signUp({
       email,
       password,
       username: username.trim(),
@@ -39,7 +44,15 @@ export default function RegisterPage() {
       title: "Account created",
       description: `Welcome, ${username.trim()}.`,
     });
-    router.push("/dashboard");
+    router.replace("/dashboard");
+  }
+
+  if (user) {
+    return (
+      <main className="page-enter app-aurora flex min-h-[calc(100vh-4rem)] items-center justify-center bg-gradient-to-br from-black via-slate-950 to-cyan-950 px-6 py-12">
+        <p className="text-sm text-gray-400">Already signed in — redirecting…</p>
+      </main>
+    );
   }
 
   return (

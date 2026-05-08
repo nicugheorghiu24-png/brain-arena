@@ -1,4 +1,3 @@
-import { getUser } from "../../lib/fakeAuth";
 import type { Question, SeenMap } from "./types";
 
 const STORAGE_PREFIX = "brain-arena:seen:";
@@ -11,20 +10,26 @@ function userKey(userId: string): string {
 }
 
 /**
- * Resolve a stable user id for the seen-history.
- * - Signed-in: the user's email
- * - Anonymous: a per-device id stored in localStorage
- * - SSR / no window: null (caller skips persistence)
+ * Resolve a stable user id for the seen-history bucket.
+ * - Signed-in: the authenticated user's UUID (passed by caller from
+ *   useAuth().user). UUID is stable across devices and matches what
+ *   the server records in MatchResult.userId.
+ * - Anonymous: a per-device id stored in localStorage so first-visit
+ *   players still get the 60-day no-repeat protection within a device.
+ * - SSR / no window: null (caller skips persistence).
+ *
+ * Callers in client components should pass the user from useAuth so
+ * we keep a single source of truth for identity.
  */
-export function getCurrentUserId(): string | null {
+export function resolveSeenUserId(
+  authUser: { id?: string } | null | undefined,
+): string | null {
   if (typeof window === "undefined") return null;
-  const u = getUser();
-  if (u?.email) return u.email;
+  if (authUser?.id) return authUser.id;
   let anon = window.localStorage.getItem(ANON_KEY);
   if (!anon) {
     // Random suffix only used to identify the browser, never to influence
-    // gameplay. Date.now() and Math.random() here run in browser only,
-    // and only once per device (then cached).
+    // gameplay. Runs once per device, then cached.
     anon = `anon-${Date.now().toString(36)}-${Math.floor(
       Math.random() * 0xffffff,
     ).toString(36)}`;

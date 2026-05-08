@@ -2,14 +2,8 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState, useSyncExternalStore } from "react";
-import {
-  getServerUser,
-  getUser,
-  signIn,
-  signOut,
-  subscribeUser,
-} from "../lib/fakeAuth";
+import { useState } from "react";
+import { useAuth } from "./AuthProvider";
 import { useToast } from "./ui/Toast";
 
 const navLinks = [
@@ -24,61 +18,16 @@ export default function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
   const toast = useToast();
-  const user = useSyncExternalStore(subscribeUser, getUser, getServerUser);
+  const { user, signOut } = useAuth();
   const [open, setOpen] = useState(false);
-
-  // Reconcile fakeAuth (localStorage display state) with the real
-  // server session on mount. Two directions:
-  //   1. Server has a valid session, localStorage doesn't → rehydrate.
-  //   2. Server says no auth, localStorage has a stale user → clear it.
-  // Without (2) the navbar shows "Hi, X" while every API call returns
-  // 401, e.g. when the cookie was issued with Secure on an HTTP origin.
-  // Network errors / 5xx responses leave the local state alone so a
-  // transient outage doesn't appear to log the user out.
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      let res: Response;
-      try {
-        res = await fetch("/api/auth/me", { credentials: "include" });
-      } catch {
-        return; // network error — keep local state
-      }
-      if (cancelled) return;
-      if (!res.ok) return; // 5xx — keep local state
-      let data: { user: { id: string; email: string; username: string } | null };
-      try {
-        data = await res.json();
-      } catch {
-        return;
-      }
-      if (cancelled) return;
-      if (data.user) {
-        if (getUser()?.id !== data.user.id) {
-          signIn({
-            id: data.user.id,
-            email: data.user.email,
-            username: data.user.username,
-          });
-        }
-      } else if (getUser()) {
-        // Server explicitly says no authenticated user. Drop the stale
-        // localStorage so navbar + protected routes agree.
-        signOut();
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const isActive = (href: string) =>
     href === "/" ? pathname === "/" : pathname.startsWith(href);
 
   const display = user?.username ?? user?.email?.split("@")[0] ?? null;
 
-  function handleLogout() {
-    signOut();
+  async function handleLogout() {
+    await signOut();
     toast.push({ type: "info", title: "Signed out" });
     router.push("/");
   }

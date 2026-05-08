@@ -1,11 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import {
-  getServerUser,
-  getUser,
-  subscribeUser,
-} from "../lib/fakeAuth";
+import { useEffect, useRef, useState } from "react";
+import { useAuth } from "../components/AuthProvider";
 import { DEFAULT_PROFILE } from "../lib/fakeData";
 import { useToast } from "../components/ui/Toast";
 import { GameLayout } from "../games/components/GameLayout";
@@ -19,7 +15,7 @@ import { computeReward } from "../games/reward";
 import { getGame } from "../games/registry";
 import type { RewardSummary } from "../games/types";
 import {
-  getCurrentUserId,
+  resolveSeenUserId,
   markQuestionsAsSeen,
   type Question,
 } from "../games/questions";
@@ -42,7 +38,7 @@ const OPPONENT_NAME = "PixelHawk";
 
 export default function MathPage() {
   const toast = useToast();
-  const user = useSyncExternalStore(subscribeUser, getUser, getServerUser);
+  const { user } = useAuth();
   const username =
     user?.username ?? user?.email?.split("@")[0] ?? DEFAULT_PROFILE.username;
 
@@ -75,7 +71,7 @@ export default function MathPage() {
     if (problems.length > 0) return;
     if (phase !== "playing" && phase !== "intro") return;
     const id = setTimeout(() => {
-      const userId = getCurrentUserId();
+      const userId = resolveSeenUserId(user);
       const seed = createMatchSeed();
       setMatchSeed(seed);
       const initial = generateMatchQuestionSetForUser(
@@ -89,7 +85,7 @@ export default function MathPage() {
       markQuestionsAsSeen(userId, initial);
     }, 0);
     return () => clearTimeout(id);
-  }, [problems.length, phase, difficulty]);
+  }, [problems.length, phase, difficulty, user]);
 
   // Top up the queue if running low. Each refill batch uses a fresh seed
   // and respects the cumulative seen-history (which now includes the
@@ -98,7 +94,7 @@ export default function MathPage() {
     if (problems.length === 0) return;
     if (problems.length - problemIdx > REFILL_AT) return;
     const id = setTimeout(() => {
-      const userId = getCurrentUserId();
+      const userId = resolveSeenUserId(user);
       const seed = createMatchSeed();
       const more = generateMatchQuestionSetForUser(
         GAME_ID,
@@ -111,7 +107,7 @@ export default function MathPage() {
       markQuestionsAsSeen(userId, more);
     }, 0);
     return () => clearTimeout(id);
-  }, [problems.length, problemIdx, difficulty]);
+  }, [problems.length, problemIdx, difficulty, user]);
 
   // Global sprint timer — when it expires, finish the game
   const timer = useGameTimer({
@@ -179,7 +175,7 @@ export default function MathPage() {
           result === "win" ? "Victory" : result === "draw" ? "Draw" : "Defeat",
         description: `${score.self} – ${score.opponent} solved vs ${OPPONENT_NAME}`,
       });
-      const userId = getCurrentUserId();
+      const userId = resolveSeenUserId(user);
       if (!userId) return;
       const recorded = await recordSoloMatchOutcome(
         {
@@ -216,7 +212,7 @@ export default function MathPage() {
     startedAt,
     toast,
     username,
-    user?.email,
+    user,
     matchSeed,
     difficulty,
   ]);
