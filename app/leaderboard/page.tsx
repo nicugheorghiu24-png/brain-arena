@@ -9,7 +9,8 @@ import {
 } from "../lib/fakeAuth";
 import { TierBadge } from "../components/ui/TierBadge";
 import { Avatar } from "../components/ui/Avatar";
-import { db, type LeaderboardRow, type LeaderboardSort } from "../lib/db";
+import { FAKE_LEADERBOARD } from "../lib/fakeData";
+import type { LeaderboardRow, LeaderboardSort } from "../lib/db";
 
 const REGIONS = ["All", "EU", "NA", "AS"] as const;
 const SORTS: { id: LeaderboardSort; label: string }[] = [
@@ -20,34 +21,75 @@ const SORTS: { id: LeaderboardSort; label: string }[] = [
 
 type Region = (typeof REGIONS)[number];
 
+const FALLBACK_ROWS: LeaderboardRow[] = FAKE_LEADERBOARD.map((r) => ({
+  userId: `seed:${r.username.toLowerCase()}`,
+  username: r.username,
+  tier: r.tier,
+  division: r.division,
+  lp: r.lp,
+  wins: r.wins,
+  losses: r.losses,
+  region: r.region,
+  isYou: false,
+}));
+
 export default function LeaderboardPage() {
   const viewer = useSyncExternalStore(subscribeUser, getUser, getServerUser);
-  const youUserId = viewer?.email ?? null;
 
   const [region, setRegion] = useState<Region>("All");
   const [sort, setSort] = useState<LeaderboardSort>("mmr");
-  const [rows, setRows] = useState<LeaderboardRow[]>([]);
+  const [rows, setRows] = useState<LeaderboardRow[]>(FALLBACK_ROWS);
   const [loading, setLoading] = useState(true);
+  const [usingDemo, setUsingDemo] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
-    const id = setTimeout(async () => {
+    void (async () => {
       setLoading(true);
-      const out = await db.leaderboard.list({
-        sort,
-        region: region === "All" ? undefined : region,
-        youUserId,
-        limit: 50,
-      });
-      if (cancelled) return;
-      setRows(out);
-      setLoading(false);
-    }, 0);
+      try {
+        const params = new URLSearchParams({ sort, limit: "50" });
+        if (region !== "All") params.set("region", region);
+        const res = await fetch(`/api/leaderboard?${params.toString()}`, {
+          credentials: "include",
+        });
+        if (!res.ok) {
+          if (!cancelled) {
+            setRows(FALLBACK_ROWS);
+            setUsingDemo(true);
+            setLoading(false);
+          }
+          return;
+        }
+        const data = (await res.json()) as {
+          ok: boolean;
+          you: string | null;
+          rows: Array<Omit<LeaderboardRow, "isYou">>;
+        };
+        if (cancelled) return;
+        if (data.rows.length > 0) {
+          setRows(
+            data.rows.map((r) => ({
+              ...r,
+              isYou: data.you !== null && r.userId === data.you,
+            })),
+          );
+          setUsingDemo(false);
+        } else {
+          setRows(FALLBACK_ROWS);
+          setUsingDemo(true);
+        }
+      } catch {
+        if (cancelled) return;
+        setRows(FALLBACK_ROWS);
+        setUsingDemo(true);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
     return () => {
       cancelled = true;
-      clearTimeout(id);
     };
-  }, [sort, region, youUserId]);
+  }, [sort, region, viewer?.email]);
 
   // Re-rank within current sort/region selection.
   const ranked = useMemo(
@@ -71,6 +113,11 @@ export default function LeaderboardPage() {
             <p className="mt-2 text-sm text-gray-400">
               Top minds in the arena. Sortable by skill metric.
             </p>
+            {usingDemo && !loading && (
+              <p className="mt-2 inline-block rounded-full border border-amber-400/30 bg-amber-500/10 px-3 py-1 text-xs text-amber-200">
+                Demo data — play matches to seed the live leaderboard.
+              </p>
+            )}
           </div>
 
           <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:gap-3">
