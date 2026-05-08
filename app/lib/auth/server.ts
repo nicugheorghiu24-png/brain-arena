@@ -11,6 +11,28 @@ const BCRYPT_COST = 12;
 
 export const SESSION_COOKIE_NAME = SESSION_COOKIE;
 
+/**
+ * Decide whether the session cookie should carry the `Secure` flag.
+ * The flag means "browser only sends this cookie over HTTPS" — so we
+ * MUST set it to false on a deploy that serves plain HTTP, otherwise
+ * the cookie is silently dropped by the browser and every subsequent
+ * /api/auth/me returns null even though the user "logged in".
+ *
+ * Source of truth: PUBLIC_ORIGIN. If every comma-separated origin is
+ * https://, the deployment is fully on HTTPS and Secure is safe.
+ * If any origin is http://, drop Secure so the cookie remains usable.
+ * If PUBLIC_ORIGIN is not set, fall back to NODE_ENV — preserves the
+ * old default for dev (false) and a strict prod (true) that hasn't
+ * been configured yet.
+ */
+function shouldUseSecureCookie(): boolean {
+  const raw = process.env.PUBLIC_ORIGIN?.trim();
+  if (!raw) return process.env.NODE_ENV === "production";
+  const origins = raw.split(",").map((s) => s.trim()).filter(Boolean);
+  if (origins.length === 0) return process.env.NODE_ENV === "production";
+  return origins.every((o) => o.toLowerCase().startsWith("https://"));
+}
+
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, BCRYPT_COST);
 }
@@ -34,7 +56,7 @@ export async function setSessionCookie(token: string): Promise<void> {
   const c = await cookies();
   c.set(SESSION_COOKIE, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: shouldUseSecureCookie(),
     sameSite: "lax",
     path: "/",
     maxAge: Math.floor(SESSION_TTL_MS / 1000),
