@@ -41,17 +41,19 @@ export async function POST(req: Request) {
     );
   }
 
+  // Static dummy hash used for timing equalization. bcrypt verification
+  // takes ~150-300ms regardless of input; running it on the no-user path
+  // closes the timing side-channel that would otherwise let an attacker
+  // distinguish "email doesn't exist" from "wrong password" by latency.
+  // The hash itself is never compared to a real password — we just want
+  // bcrypt to do the work.
+  const DUMMY_HASH =
+    "$2a$12$abcdefghijklmnopqrstuuU3K8hGd/Vx3rRP2H7WQRpgSk0oGzWAS";
   try {
     const user = await usersService.findByEmail(parsed.data.email.toLowerCase().trim());
-    // Constant-message rejection to avoid email-enumeration.
-    if (!user) {
-      return NextResponse.json(
-        { ok: false, reason: "Invalid email or password." },
-        { status: 401 },
-      );
-    }
-    const ok = await verifyPassword(parsed.data.password, user.passwordHash);
-    if (!ok) {
+    const passwordToVerify = user?.passwordHash ?? DUMMY_HASH;
+    const ok = await verifyPassword(parsed.data.password, passwordToVerify);
+    if (!user || !ok) {
       return NextResponse.json(
         { ok: false, reason: "Invalid email or password." },
         { status: 401 },

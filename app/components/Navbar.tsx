@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import {
   getServerUser,
   getUser,
+  signIn,
   signOut,
   subscribeUser,
 } from "../lib/fakeAuth";
@@ -25,6 +26,36 @@ export default function Navbar() {
   const toast = useToast();
   const user = useSyncExternalStore(subscribeUser, getUser, getServerUser);
   const [open, setOpen] = useState(false);
+
+  // Rehydrate fakeAuth from the server session on mount. Fixes the case
+  // where localStorage was cleared but the ba_session cookie is still
+  // valid — without this, the UI shows "logged out" even though the
+  // server would happily authenticate.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/auth/me", { credentials: "include" });
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          user: { id: string; email: string; username: string } | null;
+        };
+        if (cancelled) return;
+        if (data.user && getUser()?.id !== data.user.id) {
+          signIn({
+            id: data.user.id,
+            email: data.user.email,
+            username: data.user.username,
+          });
+        }
+      } catch {
+        // ignore — offline or no API
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const isActive = (href: string) =>
     href === "/" ? pathname === "/" : pathname.startsWith(href);

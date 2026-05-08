@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { isDbConfigured, DbNotConfiguredError } from "../../../lib/prisma";
 import {
   hashPassword,
@@ -79,6 +80,19 @@ export async function POST(req: Request) {
         { status: 503 },
       );
     }
+    // Unique-constraint race: the existence pre-check passed but a
+    // concurrent signup beat us to the insert. Translate to 409 so the
+    // client shows a helpful message instead of "Server error".
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === "P2002"
+    ) {
+      return NextResponse.json(
+        { ok: false, reason: "Email or username already taken." },
+        { status: 409 },
+      );
+    }
+    console.error("[/api/auth/signup] failed:", err);
     return NextResponse.json(
       { ok: false, reason: "Server error." },
       { status: 500 },
