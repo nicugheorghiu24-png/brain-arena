@@ -1,0 +1,47 @@
+# systemd unit for Brain Arena.
+#
+# Install (one-time, on the VPS):
+#   sudo cp scripts/brain-arena.service /etc/systemd/system/brain-arena.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now brain-arena.service
+#
+# Operate:
+#   sudo systemctl status brain-arena.service
+#   sudo systemctl restart brain-arena.service
+#   sudo journalctl -u brain-arena.service -f
+#
+# After this is in place, scripts/deploy.sh auto-detects systemd and
+# uses `systemctl restart brain-arena.service` to swap to the new build.
+# The app survives SSH disconnects, reboots, and crashes (Restart=always).
+
+[Unit]
+Description=Brain Arena (Next.js + Socket.IO custom server)
+After=network.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/brain-arena
+ExecStart=/usr/bin/npm run start
+# .env is loaded by server.js via @next/env. NODE_ENV is the only var
+# the unit pins, because npm scripts inherit it.
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Restart=always
+RestartSec=3
+# Give the process up to 15 s to drain on shutdown (graceful socket
+# close in server.js's SIGTERM handler).
+TimeoutStopSec=15
+KillSignal=SIGTERM
+StandardOutput=append:/var/log/brain-arena/systemd.log
+StandardError=append:/var/log/brain-arena/systemd.log
+
+# Hardening — comment out any of these if you hit a permission issue.
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=false
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
