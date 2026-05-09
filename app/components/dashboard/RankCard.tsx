@@ -2,6 +2,11 @@ type Props = {
   tier: string;
   division: string;
   lp: number;
+  // When provisional, the player is still in placement and the tier
+  // shown is mostly cosmetic. UI badges this differently — see
+  // COMPETITIVE_SYSTEMS.md "Placement matches".
+  isProvisional?: boolean;
+  placementMatchesPlayed?: number;
 };
 
 // Tier thresholds mirror lib/services/profiles.ts:tierForLp.
@@ -15,7 +20,66 @@ const TIER_NEXT: Record<string, number | null> = {
   Master: null,
 };
 
-export default function RankCard({ tier, division, lp }: Props) {
+const PLACEMENT_TOTAL = 5;
+
+export default function RankCard({
+  tier,
+  division,
+  lp,
+  isProvisional = false,
+  placementMatchesPlayed = 0,
+}: Props) {
+  // Provisional path — show placement progress instead of tier-climb
+  // progress. The actual tier exists underneath but isn't load-bearing
+  // until placement is done.
+  if (isProvisional) {
+    const progressPct = Math.min(
+      100,
+      Math.round((placementMatchesPlayed / PLACEMENT_TOTAL) * 100),
+    );
+    return (
+      <div className="relative overflow-hidden rounded-2xl border border-amber-400/30 bg-gradient-to-br from-amber-500/10 via-slate-900 to-black p-6 shadow-[0_0_60px_-30px_rgba(251,191,36,0.7)]">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-amber-400/20 blur-3xl"
+        />
+
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-xs uppercase tracking-widest text-amber-300/80">
+              Provisional
+            </div>
+            <div className="mt-1 text-3xl font-extrabold text-white">
+              {placementMatchesPlayed} <span className="text-amber-300">of {PLACEMENT_TOTAL}</span>
+            </div>
+            <p className="mt-1 text-xs text-gray-400">
+              Play {PLACEMENT_TOTAL} matches to lock in your tier.
+            </p>
+          </div>
+          <div className="rounded-full border border-amber-400/40 bg-black/40 px-3 py-1 text-sm text-amber-200">
+            {lp} LP
+          </div>
+        </div>
+
+        <div className="mt-6">
+          <div className="mb-2 flex justify-between text-xs text-gray-400">
+            <span>Placement progress</span>
+            <span>
+              {placementMatchesPlayed} / {PLACEMENT_TOTAL}
+            </span>
+          </div>
+          <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-amber-400 to-amber-200 shadow-[0_0_12px_rgba(251,191,36,0.8)]"
+              style={{ width: `${progressPct}%` }}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Standard ranked card — same as before placement work.
   const nextLp = TIER_NEXT[tier] ?? null;
   const progress =
     nextLp !== null && nextLp > 0

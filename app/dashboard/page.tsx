@@ -21,7 +21,10 @@ const FALLBACK_PROFILE = {
   xpToNext: 800,
   wins: 0,
   losses: 0,
+  currentStreak: 0,
   bestStreak: 0,
+  placementMatchesPlayed: 0,
+  isProvisional: true,
 };
 
 export default function DashboardPage() {
@@ -97,6 +100,8 @@ export default function DashboardPage() {
               tier={profile.tier}
               division={profile.division}
               lp={profile.lp}
+              isProvisional={profile.isProvisional ?? false}
+              placementMatchesPlayed={profile.placementMatchesPlayed ?? 0}
             />
           </div>
           <div className="lg:col-span-2">
