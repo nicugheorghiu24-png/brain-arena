@@ -85,7 +85,14 @@ export const profilesService = {
     return prisma.$transaction(async (tx) => {
       const profile = await tx.profile.findUnique({ where: { userId } });
       if (!profile) return null;
-      const lp = Math.max(0, profile.lp + outcome.lpDelta);
+
+      // 1.5× LP magnitude during placement. Same on wins and losses
+      // — gets the player to their real tier faster in either
+      // direction. Per COMPETITIVE_SYSTEMS.md placement matches spec.
+      const placementBoost = profile.placementMatchesPlayed < 5 ? 1.5 : 1;
+      const adjustedLpDelta = Math.round(outcome.lpDelta * placementBoost);
+
+      const lp = Math.max(0, profile.lp + adjustedLpDelta);
       const wins = profile.wins + (outcome.result === "win" ? 1 : 0);
       const losses = profile.losses + (outcome.result === "loss" ? 1 : 0);
       const xpFields = applyXp(profile, outcome.xpGained);

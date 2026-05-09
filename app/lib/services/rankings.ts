@@ -41,7 +41,11 @@ export const rankingsService = {
         1 / (1 + Math.pow(10, (opponentLp - profile.lp) / 400));
       const actualScore =
         result === "win" ? 1 : result === "loss" ? 0 : 0.5;
-      const lpDelta = Math.round(32 * (actualScore - expectedScore));
+      const baseLpDelta = Math.round(32 * (actualScore - expectedScore));
+      // 1.5× during placement — same on wins and losses. Per
+      // COMPETITIVE_SYSTEMS.md.
+      const placementBoost = profile.placementMatchesPlayed < 5 ? 1.5 : 1;
+      const lpDelta = Math.round(baseLpDelta * placementBoost);
       const newLp = Math.max(0, profile.lp + lpDelta);
       const { tier: newTier, division: newDivision } = tierForLp(newLp);
 
