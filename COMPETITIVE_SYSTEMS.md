@@ -118,12 +118,14 @@ behaviors during placement:
 After placement_matches_played reaches 5, the profile becomes a normal
 ranked profile with the standard tier-by-LP rules.
 
-This is partially implemented:
+This is now fully implemented:
 
-- ✅ `placementMatchesPlayed` field on Profile (this turn)
-- ✅ Increment in `applyMatchOutcome` (this turn)
-- ⏭ 1.5× LP magnitude during placement (M2)
-- ⏭ "Provisional" UI badge (next turn)
+- ✅ `placementMatchesPlayed` field on Profile
+- ✅ Increment in `applyMatchOutcome` and `rankingsService.updatePlayerRank`
+- ✅ 1.5× LP magnitude during placement (in both progression paths)
+- ✅ "Provisional" badge in the dashboard's `RankCard` while
+  `placementMatchesPlayed < 5` — shows placement progress instead of
+  the tier-climb bar
 
 ---
 

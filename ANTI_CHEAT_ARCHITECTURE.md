@@ -46,19 +46,44 @@ gap.**
 
 ---
 
-## Replay validation (M2 work; framework lands now)
+## Replay validation (framework + math validator shipped)
 
-Each solo-game submission to `/api/matches` will include an `inputs`
-field — a compact representation of the player's input stream.
-
-**Schema (M2 — schema additive):**
+Each solo-game submission to `/api/matches` includes an optional
+`inputs` field — a compact representation of the player's input stream.
+The schema is shipped:
 
 ```ts
-// On MatchResult
-inputs           Json?  // per-game input stream
-inputsValidated  Boolean @default(false)
-auditFlags       String[] @default([])  // PG TEXT[]; e.g. ['too_fast', 'too_perfect']
+// On MatchResult — actually in prisma/schema.prisma now
+inputs           Json?
+inputsValidated  Boolean  @default(false)
+auditFlags       String[] @default([])  // ['answer_too_fast', 'score_mismatch', …]
 ```
+
+The validator registry is at `app/lib/games/replay/index.ts`. Math
+validator (`app/lib/games/replay/math.ts`) shipped this turn and
+enforces:
+
+  - ≥ 100 ms per answer (anything faster is bot-speed)
+  - ≤ 30 000 ms per answer (anything longer = walked away, doesn't
+    count toward total)
+  - Score reconciliation: claimed `scoreSelf` must equal the count of
+    inputs where `chosenIndex === correctIndex`
+  - Total answer count ≤ rounds (= sprint duration in seconds)
+  - Sum of per-answer ms ≤ `durationMs * 1.1` (10% slack)
+
+On validator failure, `/api/matches` POST clamps `lpDelta` to 0,
+saves the flags on `MatchResult.auditFlags`, and writes an
+`AuditEvent` row with `category="replay"`. The match is still
+recorded — we want the data — just no progression for it.
+
+What the math validator DOES NOT yet defend (M2 follow-up): a
+cheater that submits inputs with fabricated `correctIndex`. True
+server-deterministic replay would regenerate the same question set
+from `matchSeed` and verify `correctIndex` from the generator.
+Math's question pipeline currently uses fresh client-side seeds per
+refill batch which makes that non-trivial. Fix: switch math to a
+single match-bound seed + larger initial batch, then this
+validator gains a "regenerate set, verify correctIndex" step.
 
 **Per-game `inputs` shape:**
 

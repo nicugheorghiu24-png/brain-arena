@@ -57,8 +57,12 @@ A change ships when:
 | **Match-finished screen polish** (stats vs lifetime, streak feedback) | Frontend | next turn |
 | **First-match guidance overlay** for new users | Frontend | next turn |
 | **Onboarding** — username confirmation, region pick | Frontend | next turn |
-| Replay validation framework (server-side) for solo games | Backend | next turn |
-| Per-game replay validators (math, memory, reaction, quiz) | Backend | M2 |
+| Replay validation framework (server-side) for solo games | Backend | shipped this turn |
+| Math game replay validator (bounds + score reconciliation) | Backend | shipped this turn |
+| Achievement catalog + auto-awarding on match end | Backend | shipped this turn |
+| 1.5× LP magnitude during placement | Backend | shipped this turn |
+| `RankCard` "Provisional" badge while in placement | Frontend | shipped this turn |
+| Per-game replay validators (memory, reaction, quiz) | Backend | M2 |
 | Email verification + password reset | Backend + ops | M2 |
 
 ### M2 — "Open Beta" — ETA 2026-06-06 (≈ 4 weeks)
