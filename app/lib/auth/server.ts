@@ -94,6 +94,12 @@ export type CurrentUserWithProfile = CurrentUser & {
     joinedAt: string;
     favoriteGameId: string | null;
   };
+  /**
+   * Catalog ids of achievements the user has unlocked. The catalog
+   * itself is in app/lib/services/achievements.ts:ACHIEVEMENT_CATALOG
+   * — clients render against the catalog using these ids.
+   */
+  unlockedAchievementIds: string[];
 };
 
 /**
@@ -120,7 +126,14 @@ export async function getCurrentUserWithProfile(): Promise<CurrentUserWithProfil
   const prisma = requirePrisma();
   const session = await prisma.session.findUnique({
     where: { token },
-    include: { user: { include: { profile: true } } },
+    include: {
+      user: {
+        include: {
+          profile: true,
+          achievements: { select: { achievementId: true } },
+        },
+      },
+    },
   });
   if (!session) return null;
   if (session.expiresAt.getTime() < Date.now()) {
@@ -156,6 +169,7 @@ export async function getCurrentUserWithProfile(): Promise<CurrentUserWithProfil
       joinedAt: p.joinedAt.toISOString(),
       favoriteGameId: p.favoriteGameId,
     },
+    unlockedAchievementIds: session.user.achievements.map((a) => a.achievementId),
   };
 }
 

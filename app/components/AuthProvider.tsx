@@ -33,6 +33,7 @@ export type AuthUser = {
   email: string;
   username: string;
   profile?: AuthProfile;
+  unlockedAchievementIds?: string[];
 };
 
 type AuthContextValue = {
