@@ -12,6 +12,11 @@ export type ClientMatchOutcome = {
   scoreOpponent: number;
   opponentName: string;
   matchSeed?: number;
+  // Optional input stream for server-side replay validation. Shape
+  // is per-game (math: { answers: [{questionId, chosenIndex,
+  // correctIndex, ms}, ...] }). The server's validator registry in
+  // app/lib/games/replay/index.ts decides what to do with it.
+  inputs?: unknown;
 };
 
 export type RecordedMatch = {

@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { isDbConfigured, DbNotConfiguredError } from "../../lib/prisma";
+import { isDbConfigured, DbNotConfiguredError, requirePrisma } from "../../lib/prisma";
 import { getCurrentUser } from "../../lib/auth/server";
 import { matchesService } from "../../lib/services/matches";
 import { profilesService } from "../../lib/services/profiles";
 import { computeReward } from "../../games/reward";
 import { isKnownGame } from "../../games/registry";
+import { getValidator } from "../../lib/games/replay";
+import { unlockAchievementsForOutcome } from "../../lib/services/achievements";
 
 export const runtime = "nodejs";
 
@@ -68,6 +70,15 @@ const matchInputSchema = z.object({
   scoreOpponent: z.number().int().min(0).max(MAX_SCORE),
   opponentName: z.string().min(1).max(32),
   matchSeed: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+  // Optional input stream for replay validation. Cap on raw size so
+  // a malformed client can't blow up the request body.
+  inputs: z
+    .unknown()
+    .refine(
+      (v) => v === undefined || typeof v === "object",
+      "inputs must be an object",
+    )
+    .optional(),
 });
 
 export async function POST(req: Request) {
@@ -115,7 +126,7 @@ export async function POST(req: Request) {
   // Server-authoritative reward. The client never sends lpDelta/xpGained;
   // we recompute them from the validated outcome so a tampered client
   // can't inflate progression.
-  const reward = computeReward({
+  const baseReward = computeReward({
     gameId: input.gameId,
     result: input.result,
     score: { self: input.scoreSelf, opponent: input.scoreOpponent },
@@ -123,7 +134,55 @@ export async function POST(req: Request) {
     rounds: input.rounds,
   });
 
+  // Replay validation. If the client sent `inputs` AND we have a
+  // validator for this gameId, run it. On failure: clamp lpDelta to
+  // 0 (no progression for cheaters), persist the flags, write an
+  // audit_events row. Match still records — we want the data for
+  // analysis, just don't reward it.
+  let inputsValidated = false;
+  let auditFlags: string[] = [];
+  let lpDelta = baseReward.lpDelta;
+  if (input.inputs !== undefined) {
+    const validator = getValidator(input.gameId);
+    if (validator) {
+      const result = validator(
+        {
+          gameId: input.gameId,
+          scoreSelf: input.scoreSelf,
+          scoreOpponent: input.scoreOpponent,
+          rounds: input.rounds,
+          durationMs: input.durationMs,
+          difficulty: input.difficulty,
+          matchSeed: input.matchSeed,
+        },
+        input.inputs,
+      );
+      if (result.valid) {
+        inputsValidated = true;
+      } else {
+        auditFlags = result.flags;
+        lpDelta = 0;
+      }
+    }
+  }
+
   try {
+    const prisma = requirePrisma();
+    const beforeProfile = await prisma.profile.findUnique({
+      where: { userId: user.id },
+      select: {
+        lp: true,
+        level: true,
+        tier: true,
+        division: true,
+        currentStreak: true,
+        bestStreak: true,
+        wins: true,
+        losses: true,
+        placementMatchesPlayed: true,
+      },
+    });
+
     const created = await matchesService.record({
       gameId: input.gameId,
       matchSeed: input.matchSeed ?? 0,
@@ -138,24 +197,77 @@ export async function POST(req: Request) {
           result: input.result,
           scoreSelf: input.scoreSelf,
           scoreOpponent: input.scoreOpponent,
-          lpDelta: reward.lpDelta,
-          xpGained: reward.xpGained,
+          lpDelta,
+          xpGained: baseReward.xpGained,
         },
       ],
     });
 
+    // Persist the optional inputs + validation outcome on the
+    // MatchResult row we just created. Prisma needs an explicit
+    // type when assigning to a Json column; we pass either the
+    // unknown payload as InputJsonValue or skip the field entirely.
+    if (input.inputs !== undefined || auditFlags.length > 0) {
+      await prisma.matchResult.updateMany({
+        where: { matchId: created.id, userId: user.id },
+        data: {
+          ...(input.inputs !== undefined
+            ? { inputs: input.inputs as object }
+            : {}),
+          inputsValidated,
+          auditFlags,
+        },
+      });
+    }
+
+    // If the validator flagged this submission, write an audit event
+    // so admins can review patterns.
+    if (auditFlags.length > 0) {
+      await prisma.auditEvent.create({
+        data: {
+          userId: user.id,
+          matchId: created.id,
+          category: "replay",
+          severity: "warn",
+          flags: auditFlags,
+          details: {
+            gameId: input.gameId,
+            claimedScore: input.scoreSelf,
+            durationMs: input.durationMs,
+          },
+        },
+      });
+    }
+
     const updatedProfile = await profilesService.applyMatchOutcome(user.id, {
       result: input.result,
-      lpDelta: reward.lpDelta,
-      xpGained: reward.xpGained,
+      lpDelta,
+      xpGained: baseReward.xpGained,
     });
+
+    // Auto-award achievements based on the new state. Idempotent —
+    // duplicate awards are no-ops via Prisma upsert.
+    const newAchievements = updatedProfile
+      ? await unlockAchievementsForOutcome({
+          userId: user.id,
+          gameId: input.gameId,
+          result: input.result,
+          before: beforeProfile,
+          after: updatedProfile,
+        })
+      : [];
 
     return NextResponse.json({
       ok: true,
       match: { id: created.id },
       reward: {
-        lpDelta: reward.lpDelta,
-        xpGained: reward.xpGained,
+        lpDelta,
+        xpGained: baseReward.xpGained,
+      },
+      validation: {
+        validatorRan: input.inputs !== undefined && getValidator(input.gameId) !== null,
+        inputsValidated,
+        auditFlags,
       },
       profile: updatedProfile
         ? {
@@ -167,8 +279,26 @@ export async function POST(req: Request) {
             division: updatedProfile.division,
             wins: updatedProfile.wins,
             losses: updatedProfile.losses,
+            currentStreak: updatedProfile.currentStreak,
+            bestStreak: updatedProfile.bestStreak,
+            placementMatchesPlayed: updatedProfile.placementMatchesPlayed,
+            isProvisional: updatedProfile.placementMatchesPlayed < 5,
           }
         : null,
+      // Match-end UX signals — let the client celebrate appropriately.
+      milestones: updatedProfile && beforeProfile
+        ? {
+            tierPromoted:
+              updatedProfile.tier !== beforeProfile.tier ||
+              updatedProfile.division !== beforeProfile.division,
+            leveledUp: updatedProfile.level > beforeProfile.level,
+            newStreakRecord:
+              updatedProfile.bestStreak > beforeProfile.bestStreak,
+            firstWinEver:
+              input.result === "win" && beforeProfile.wins === 0,
+          }
+        : null,
+      achievementsUnlocked: newAchievements,
     });
   } catch (err) {
     if (err instanceof DbNotConfiguredError) {

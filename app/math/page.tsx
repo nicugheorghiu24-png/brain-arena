@@ -61,6 +61,23 @@ export default function MathPage() {
   const [startedAt] = useState<number>(() => Date.now());
   const [reward, setReward] = useState<RewardSummary | null>(null);
   const resultFiredRef = useRef<boolean>(false);
+  // Per-answer input stream. Recorded for server-side replay
+  // validation (see app/lib/games/replay/math.ts). The ref holds
+  // a wall-clock timestamp at the moment the current problem was
+  // shown, so we can compute ms-spent on each answer.
+  const answersRef = useRef<
+    Array<{
+      questionId: string;
+      chosenIndex: number;
+      correctIndex: number;
+      ms: number;
+    }>
+  >([]);
+  // Initialized in the mount effect below so render stays pure.
+  const problemShownAtRef = useRef<number>(0);
+  useEffect(() => {
+    problemShownAtRef.current = Date.now();
+  }, []);
 
   // Seed the problem queue client-side. generateFreshQuestionSet is
   // deterministic given (seed, userId, seenMap), AND it filters out
@@ -150,6 +167,9 @@ export default function MathPage() {
     const id = setTimeout(() => {
       setProblemIdx((i) => i + 1);
       setFeedback(null);
+      // Reset the per-answer timer for the next problem. This runs
+      // inside a setTimeout callback so it's not in the render path.
+      problemShownAtRef.current = Date.now();
     }, FEEDBACK_MS);
     return () => clearTimeout(id);
   }, [feedback]);
@@ -188,6 +208,10 @@ export default function MathPage() {
           scoreOpponent: score.opponent,
           opponentName: OPPONENT_NAME,
           matchSeed,
+          // Server-side replay validation. The validator
+          // (app/lib/games/replay/math.ts) enforces minimum think
+          // time per answer + score reconciliation.
+          inputs: { answers: answersRef.current },
         },
         {
           userId,
@@ -224,6 +248,14 @@ export default function MathPage() {
     if (!p) return;
 
     const correct = idx === p.correctIndex;
+    // eslint-disable-next-line react-hooks/purity -- click handler, not render
+    const ms = Math.max(0, Date.now() - problemShownAtRef.current);
+    answersRef.current.push({
+      questionId: p.id,
+      chosenIndex: idx,
+      correctIndex: p.correctIndex,
+      ms,
+    });
     if (correct) scoreSelf();
     // Only record feedback. The advance-to-next-problem happens in the
     // effect above, batched with feedback being cleared.
