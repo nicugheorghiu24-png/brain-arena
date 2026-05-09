@@ -18,7 +18,7 @@ type Props = {
 export function MatchmakingShell({
   gameId,
   redirectTo = "/arena",
-  cancelHref = "/dashboard",
+  cancelHref = "/games",
 }: Props) {
   const router = useRouter();
   const toast = useToast();
@@ -85,11 +85,26 @@ export function MatchmakingShell({
   }, [gameId, router, toast, redirectTo, user]);
 
   function cancel() {
-    if (socketRef.current) {
-      socketRef.current.emit("leave_queue");
+    const socket = socketRef.current;
+    if (socket) {
+      // Try the cooperative path first: tell the server to drop us
+      // from the queue. emit() is fire-and-forget; if the socket isn't
+      // connected, this is a no-op locally. Then disconnect so the
+      // server's `disconnect` handler also runs `removePlayer(socket.id)`
+      // — defense in depth so we never leave a stale queue entry.
+      try {
+        socket.emit("leave_queue");
+      } catch {
+        // ignore — disconnect below is the real cleanup path
+      }
+      socket.disconnect();
+      socketRef.current = null;
     }
     toast.push({ type: "info", title: "Left queue" });
-    router.push(cancelHref);
+    // replace, not push — the cancelled matchmaking screen shouldn't
+    // sit on the back stack. Browser back from /games would otherwise
+    // bounce the user back into the queue immediately.
+    router.replace(cancelHref);
   }
 
   return (
@@ -102,13 +117,21 @@ export function MatchmakingShell({
             </div>
           )}
           <div className="relative mx-auto flex h-44 w-44 items-center justify-center sm:h-56 sm:w-56">
-            <span className="absolute inline-flex h-full w-full rounded-full border-2 border-cyan-400/40 animate-pulse-ring" />
+            {/* Decorative pulse rings. They use transform: scale(2.4)
+               which puts their hit-test boxes over the Cancel button
+               below — pointer-events-none keeps clicks flowing through. */}
             <span
-              className="absolute inline-flex h-full w-full rounded-full border-2 border-cyan-400/30 animate-pulse-ring"
+              aria-hidden
+              className="pointer-events-none absolute inline-flex h-full w-full rounded-full border-2 border-cyan-400/40 animate-pulse-ring"
+            />
+            <span
+              aria-hidden
+              className="pointer-events-none absolute inline-flex h-full w-full rounded-full border-2 border-cyan-400/30 animate-pulse-ring"
               style={{ animationDelay: "0.6s" }}
             />
             <span
-              className="absolute inline-flex h-full w-full rounded-full border-2 border-cyan-400/20 animate-pulse-ring"
+              aria-hidden
+              className="pointer-events-none absolute inline-flex h-full w-full rounded-full border-2 border-cyan-400/20 animate-pulse-ring"
               style={{ animationDelay: "1.2s" }}
             />
             <div className="relative z-10 flex h-full w-full items-center justify-center rounded-full bg-gradient-to-br from-cyan-500/20 to-slate-900/80">
