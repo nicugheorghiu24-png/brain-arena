@@ -105,32 +105,28 @@ for r in api/matches api/leaderboard api/auth/me api/auth/login api/auth/signup;
 done
 echo "BUILD_ID: $(cat .next/BUILD_ID)"
 
-if [ -z "${SKIP_KILL:-}" ]; then
-  log "10. stop any old process (port :$APP_PORT or 'tsx server.js' / 'next-server')"
-  PIDS_PORT=$(ss -tlnp 2>/dev/null | grep ":$APP_PORT " | grep -oP 'pid=\K[0-9]+' | sort -u || true)
-  PIDS_CMD=$(pgrep -af 'tsx.*server\.js|next-server|next start' 2>/dev/null | awk '{print $1}' | sort -u || true)
-  ALL_PIDS=$(printf '%s\n%s\n' "${PIDS_PORT:-}" "${PIDS_CMD:-}" | sort -u | grep -v '^$' || true)
-  if [ -n "$ALL_PIDS" ]; then
-    for p in $ALL_PIDS; do
-      echo "  pid=$p $(ps -p "$p" -o cmd= 2>/dev/null || echo gone)"
-    done
-    echo "$ALL_PIDS" | xargs -r kill -TERM
-    sleep 4
-    for p in $ALL_PIDS; do
-      if kill -0 "$p" 2>/dev/null; then
-        echo "  pid=$p still alive → SIGKILL"
-        kill -KILL "$p" 2>/dev/null || true
-      fi
-    done
-    sleep 1
-  fi
-  if ss -tlnp 2>/dev/null | grep -q ":$APP_PORT "; then
-    fatal ":$APP_PORT still bound after kill — something else is holding it"
-  fi
-  echo "✓ :$APP_PORT free"
-fi
-
-log "11. choose process manager and start"
+log "10. detect process manager"
+# Pick the manager BEFORE killing anything. systemd's Restart=always
+# and pm2's auto-restart will both respawn the process the moment we
+# kill it, racing us back into a port-already-bound state. The right
+# pattern is: let the supervisor stop+start atomically (systemctl
+# restart / pm2 restart). Only the bare-metal nohup fallback needs a
+# manual kill.
+RESOLVED_PM=""
+case "$PM_MODE" in
+  pm2|systemd|nohup) RESOLVED_PM="$PM_MODE" ;;
+  auto)
+    if command -v pm2 >/dev/null 2>&1 && pm2 jlist 2>/dev/null | grep -q '"name":"brain-arena"'; then
+      RESOLVED_PM="pm2"
+    elif systemctl list-unit-files 2>/dev/null | grep -q '^brain-arena.service'; then
+      RESOLVED_PM="systemd"
+    else
+      RESOLVED_PM="nohup"
+    fi
+    ;;
+  *) fatal "unknown PM_MODE: $PM_MODE (use auto|nohup|pm2|systemd)" ;;
+esac
+echo "Process manager: $RESOLVED_PM"
 
 start_via_pm2() {
   if pm2 jlist 2>/dev/null | grep -q '"name":"brain-arena"'; then
@@ -148,6 +144,30 @@ start_via_systemd() {
 }
 
 start_via_nohup() {
+  # nohup path needs a manual kill — there's no supervisor to do it.
+  if [ -z "${SKIP_KILL:-}" ]; then
+    log "  10a. stop any old process (port :$APP_PORT or 'tsx server.js' / 'next-server')"
+    PIDS_PORT=$(ss -tlnp 2>/dev/null | grep ":$APP_PORT " | grep -oP 'pid=\K[0-9]+' | sort -u || true)
+    PIDS_CMD=$(pgrep -af 'tsx.*server\.js|next-server|next start' 2>/dev/null | awk '{print $1}' | sort -u || true)
+    ALL_PIDS=$(printf '%s\n%s\n' "${PIDS_PORT:-}" "${PIDS_CMD:-}" | sort -u | grep -v '^$' || true)
+    if [ -n "$ALL_PIDS" ]; then
+      for p in $ALL_PIDS; do
+        echo "    pid=$p $(ps -p "$p" -o cmd= 2>/dev/null || echo gone)"
+      done
+      echo "$ALL_PIDS" | xargs -r kill -TERM
+      sleep 4
+      for p in $ALL_PIDS; do
+        if kill -0 "$p" 2>/dev/null; then
+          echo "    pid=$p still alive → SIGKILL"
+          kill -KILL "$p" 2>/dev/null || true
+        fi
+      done
+      sleep 1
+    fi
+    if ss -tlnp 2>/dev/null | grep -q ":$APP_PORT "; then
+      fatal ":$APP_PORT still bound after kill — something else is holding it"
+    fi
+  fi
   mkdir -p "$LOG_DIR"
   local logfile="$LOG_DIR/app-$(date +%Y%m%d-%H%M%S).log"
   ln -sf "$logfile" "$LOG_DIR/current.log"
@@ -156,20 +176,11 @@ start_via_nohup() {
   echo "Started via nohup; log: $logfile"
 }
 
-case "$PM_MODE" in
-  pm2)      start_via_pm2 ;;
-  systemd)  start_via_systemd ;;
-  nohup)    start_via_nohup ;;
-  auto)
-    if command -v pm2 >/dev/null 2>&1; then
-      start_via_pm2
-    elif systemctl list-unit-files 2>/dev/null | grep -q '^brain-arena.service'; then
-      start_via_systemd
-    else
-      start_via_nohup
-    fi
-    ;;
-  *) fatal "unknown PM_MODE: $PM_MODE (use auto|nohup|pm2|systemd)" ;;
+log "11. start (or restart) via $RESOLVED_PM"
+case "$RESOLVED_PM" in
+  pm2)     start_via_pm2 ;;
+  systemd) start_via_systemd ;;
+  nohup)   start_via_nohup ;;
 esac
 
 log "12. wait up to 30 s for the app to bind :$APP_PORT and respond"
