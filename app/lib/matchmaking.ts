@@ -264,6 +264,43 @@ class MatchmakingQueue {
     return matchId ? this.activeMatches.get(matchId) || null : null;
   }
 
+  /**
+   * Snapshot of queue + match state for /api/admin/metrics. Cheap —
+   * just iterates Maps that are small at beta scale. Don't call this
+   * on a hot path.
+   */
+  snapshot(): {
+    queueDepth: Record<string, number>;
+    queueDepthTotal: number;
+    activeMatches: number;
+    activeChessMatches: number;
+    activeChessMatchesEnded: number;
+    boundSockets: number;
+    spectators: number;
+  } {
+    const queueDepth: Record<string, number> = {};
+    let queueDepthTotal = 0;
+    for (const [gameId, players] of this.queue.entries()) {
+      queueDepth[gameId] = players.length;
+      queueDepthTotal += players.length;
+    }
+    let activeChessMatchesEnded = 0;
+    let spectators = 0;
+    for (const state of this.activeChessMatches.values()) {
+      if (state.endedAt) activeChessMatchesEnded += 1;
+      spectators += state.spectators.size;
+    }
+    return {
+      queueDepth,
+      queueDepthTotal,
+      activeMatches: this.activeMatches.size,
+      activeChessMatches: this.activeChessMatches.size,
+      activeChessMatchesEnded,
+      boundSockets: this.playerToMatch.size,
+      spectators,
+    };
+  }
+
   setPlayerReady(socketId: string, ready: boolean) {
     const matchId = this.playerToMatch.get(socketId);
     if (!matchId) return;
@@ -633,6 +670,37 @@ class MatchmakingQueue {
         blackResult as "win" | "loss" | "draw",
       );
 
+      // Abandon penalty: if this match ended because someone left
+      // mid-game, the loser eats an extra LP penalty on top of the
+      // Elo loss. Tracked in Profile.abandonCount and recorded as an
+      // audit event. See COMPETITIVE_SYSTEMS.md.
+      const ABANDON_LP_PENALTY = 10;
+      if (override.reason === "opponent disconnected") {
+        const loser = whiteResult === "loss" ? white : black;
+        const loserProfile = whiteResult === "loss" ? whiteProfile : blackProfile;
+        await prisma.profile.update({
+          where: { userId: loser.userId },
+          data: {
+            lp: { decrement: Math.min(ABANDON_LP_PENALTY, loserProfile.lp) },
+            abandonCount: { increment: 1 },
+          },
+        });
+        await prisma.auditEvent.create({
+          data: {
+            userId: loser.userId,
+            matchId: match.id,
+            category: "abandon",
+            severity: "warn",
+            flags: ["disconnect_forfeit"],
+            details: {
+              lpPenalty: ABANDON_LP_PENALTY,
+              reason: override.reason,
+              moveCount: state.moveHistory.length,
+            },
+          },
+        });
+      }
+
       // Sync the MatchResult rows with what the ranking service actually
       // applied (Elo delta + per-result XP). Without this, the match
       // history would show the placeholder values written above.
@@ -654,27 +722,35 @@ class MatchmakingQueue {
     // enough to spot patterns in beta.
     try {
       const audit = auditChessMatch(state);
-      if (audit.flags.white.length || audit.flags.black.length) {
-        console.warn(
-          "[anti-cheat] chess timing flags",
-          JSON.stringify({
-            matchId: match.id,
-            white: { userId: white.userId, flags: audit.flags.white, stats: audit.stats.white },
-            black: { userId: black.userId, flags: audit.flags.black, stats: audit.stats.black },
-          }),
-        );
-      } else {
-        console.info(
-          "[anti-cheat] chess timing ok",
-          JSON.stringify({
-            matchId: match.id,
-            white: audit.stats.white,
-            black: audit.stats.black,
+      // Persist to audit_events for admin triage. One row per side
+      // when there are flags; "info" severity per-side when clean
+      // so we have a baseline distribution to tune thresholds against.
+      const writes: Promise<unknown>[] = [];
+      for (const [side, player] of [
+        ["white", white],
+        ["black", black],
+      ] as const) {
+        const flags = audit.flags[side];
+        const stats = audit.stats[side];
+        if (flags.length === 0) continue;
+        writes.push(
+          prisma.auditEvent.create({
+            data: {
+              userId: player.userId,
+              matchId: match.id,
+              category: "chess_timing",
+              severity: "warn",
+              flags,
+              details: { side, stats },
+            },
           }),
         );
       }
+      if (writes.length > 0) {
+        await Promise.all(writes);
+      }
     } catch (err) {
-      console.error("Failed to run chess audit:", err);
+      console.error("Failed to persist chess audit:", err);
     }
 
     const io = getIO();
