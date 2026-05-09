@@ -59,6 +59,18 @@ export async function POST(req: Request) {
         { status: 401 },
       );
     }
+    // Banned account — refuse to issue a new session. The server-side
+    // getCurrentUser() also rejects bannedAt-set users, but we want
+    // the login response itself to be honest about why it's failing.
+    if (user.bannedAt) {
+      return NextResponse.json(
+        {
+          ok: false,
+          reason: "Account suspended. Contact support if you believe this is an error.",
+        },
+        { status: 403 },
+      );
+    }
 
     const token = await createSession(user.id);
     await setSessionCookie(token);
