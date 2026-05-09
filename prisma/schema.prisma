@@ -18,20 +18,28 @@ datasource db {
 // ─── Auth ─────────────────────────────────────────────────────────────
 
 model User {
-  id           String   @id @default(uuid())
-  email        String   @unique
+  id           String    @id @default(uuid())
+  email        String    @unique
   passwordHash String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  // Ban surface. bannedAt is the source of truth; the rest is metadata
+  // for the admin dashboard.
+  bannedAt     DateTime?
+  banReason    String?
+  bannedBy     String?
 
   profile      Profile?
   sessions     Session[]
   matchResults MatchResult[]
   achievements UserAchievement[]
   seen         SeenQuestion[]
+  auditEvents  AuditEvent[]
   wallet       Wallet?
   transactions Transaction[]
 
+  @@index([bannedAt])
   @@map("users")
 }
 
@@ -63,7 +71,16 @@ model Profile {
   joinedAt       DateTime @default(now())
   wins           Int      @default(0)
   losses         Int      @default(0)
+  // currentStreak: consecutive wins. Resets to 0 on loss/draw.
+  // bestStreak: lifetime maximum of currentStreak.
+  currentStreak  Int      @default(0)
   bestStreak     Int      @default(0)
+  // Placement matches: 0..5. While < 5, the UI shows "Provisional"
+  // and (M2) LP changes will be 1.5× normal magnitude.
+  placementMatchesPlayed Int @default(0)
+  // Lifetime abandon count — incremented when a user is the cause of
+  // an "opponent disconnected" forfeit. Surfaces in admin lookup.
+  abandonCount   Int      @default(0)
   favoriteGameId String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -80,14 +97,15 @@ model Profile {
 // add a second MatchResult row pointing at the same Match.
 
 model Match {
-  id         String        @id @default(uuid())
-  gameId     String
-  matchSeed  BigInt
-  difficulty String
-  rounds     Int
-  durationMs Int
-  createdAt  DateTime      @default(now())
-  results    MatchResult[]
+  id          String        @id @default(uuid())
+  gameId      String
+  matchSeed   BigInt
+  difficulty  String
+  rounds      Int
+  durationMs  Int
+  createdAt   DateTime      @default(now())
+  results     MatchResult[]
+  auditEvents AuditEvent[]
 
   @@index([gameId, createdAt(sort: Desc)])
   @@map("matches")
@@ -156,6 +174,34 @@ model UserAchievement {
   @@id([userId, achievementId])
   @@index([userId])
   @@map("user_achievements")
+}
+
+// ─── Audit log ───────────────────────────────────────────────────────
+// One row per noteworthy event. Supersedes the stdout-only chess
+// timing logs. Designed for human triage (admin dashboard) and as
+// the substrate for future automated action policies. See
+// ANTI_CHEAT_ARCHITECTURE.md for category/severity vocabulary.
+
+model AuditEvent {
+  id        String   @id @default(uuid())
+  matchId   String?
+  match     Match?   @relation(fields: [matchId], references: [id], onDelete: SetNull)
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  // Buckets the event so admins can filter (e.g. category="abandon").
+  category  String   // "chess_timing" | "abandon" | "replay" | "rate_limit" | "ban"
+  severity  String   // "info" | "warn" | "alert"
+  // Free-form tags. Examples: ["instant_moves"], ["replay_mismatch"],
+  // ["soft_ban", "engine_correlation_high"].
+  flags     String[] @default([])
+  // Per-event payload. Avoid putting PII here.
+  details   Json?
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([matchId])
+  @@index([category, createdAt(sort: Desc)])
+  @@map("audit_events")
 }
 
 // ─── Anti-repeat (60-day no-repeat) ──────────────────────────────────
