@@ -116,9 +116,14 @@ RESOLVED_PM=""
 case "$PM_MODE" in
   pm2|systemd|nohup) RESOLVED_PM="$PM_MODE" ;;
   auto)
-    if command -v pm2 >/dev/null 2>&1 && pm2 jlist 2>/dev/null | grep -q '"name":"brain-arena"'; then
+    # Use status commands directly instead of `… | grep -q …` because
+    # `grep -q` exits on first match and under `set -o pipefail` that
+    # SIGPIPE-kills the upstream process, which propagates as a pipe
+    # failure, which makes the elif fall through to nohup even though
+    # the systemd unit IS enabled. Caught on the brain-arena prod VPS.
+    if command -v pm2 >/dev/null 2>&1 && pm2 describe brain-arena >/dev/null 2>&1; then
       RESOLVED_PM="pm2"
-    elif systemctl list-unit-files 2>/dev/null | grep -q '^brain-arena.service'; then
+    elif systemctl is-enabled brain-arena.service >/dev/null 2>&1; then
       RESOLVED_PM="systemd"
     else
       RESOLVED_PM="nohup"
