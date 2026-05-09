@@ -124,7 +124,16 @@ model MatchResult {
   scoreOpponent Int
   lpDelta       Int      @default(0)
   xpGained      Int      @default(0)
-  createdAt     DateTime @default(now())
+  // Optional client-recorded input stream for replay validation. Shape
+  // is per-game (see app/lib/games/replay/<gameId>.ts). When present
+  // and the validator passes, inputsValidated=true. When the validator
+  // fails, auditFlags accumulates flag strings ("replay_mismatch",
+  // "answer_too_fast", etc.) and lpDelta has already been clamped to 0
+  // by the API layer.
+  inputs           Json?
+  inputsValidated  Boolean  @default(false)
+  auditFlags       String[] @default([])
+  createdAt        DateTime @default(now())
 
   @@index([userId, createdAt(sort: Desc)])
   @@index([matchId])
