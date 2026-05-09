@@ -12,7 +12,7 @@ import {
 import { Avatar } from "../ui/Avatar";
 import { TierBadge } from "../ui/TierBadge";
 import { ProgressBar } from "../ui/ProgressBar";
-import { db, type MatchRecord, type ProfileRecord } from "../../lib/db";
+import type { MatchRecord, ProfileRecord } from "../../lib/db";
 import { listGames } from "../../games/registry";
 
 type Tab = "achievements" | "history";
@@ -114,32 +114,97 @@ export function ProfileView({ username }: Props) {
 
   useEffect(() => {
     let cancelled = false;
-    const load = async () => {
-      const fromDb = await db.profiles.getByUsername(username);
-      let resolved = fromDb;
-      if (!resolved) {
-        // If the viewer is asking for their own missing profile, create
-        // it from defaults via ensureForUser.
-        if (isOwn && viewer) {
-          const userIdGuess = viewer.email ?? `local:${username}`;
-          resolved = await db.profiles.ensureForUser({
-            userId: userIdGuess,
-            username,
-            email: viewer.email,
+    void (async () => {
+      // Own profile: data is already in the AuthProvider context
+      // (server-side cookies() in the root layout populates it). No
+      // fetch needed for the profile fields.
+      if (isOwn && viewer && viewer.profile) {
+        const own: ProfileRecord = {
+          id: viewer.id,
+          username: viewer.username,
+          email: viewer.email,
+          tier: viewer.profile.tier as ProfileRecord["tier"],
+          division: viewer.profile.division as ProfileRecord["division"],
+          lp: viewer.profile.lp,
+          level: viewer.profile.level,
+          xp: viewer.profile.xp,
+          xpToNext: viewer.profile.xpToNext,
+          bio: viewer.profile.bio,
+          region: viewer.profile.region,
+          joinedAt: viewer.profile.joinedAt.slice(0, 10),
+          wins: viewer.profile.wins,
+          losses: viewer.profile.losses,
+          bestStreak: viewer.profile.bestStreak,
+          favoriteGameId: viewer.profile.favoriteGameId ?? undefined,
+        };
+        if (cancelled) return;
+        setProfile(own);
+
+        // Own match history via the server-authoritative endpoint.
+        try {
+          const res = await fetch("/api/matches?limit=12", {
+            credentials: "include",
+            cache: "no-store",
           });
-        } else {
-          resolved = makeFallbackProfile(username);
+          if (res.ok) {
+            const data = (await res.json()) as {
+              matches: Array<{
+                id: string;
+                gameId: string;
+                difficulty: string;
+                rounds: number;
+                durationMs: number;
+                playerName: string;
+                opponentName: string;
+                result: "win" | "loss" | "draw";
+                scoreSelf: number;
+                scoreOpponent: number;
+                lpDelta: number;
+                xpGained: number;
+                createdAt: string;
+              }>;
+            };
+            if (!cancelled) {
+              setMatches(
+                data.matches.map(
+                  (m): MatchRecord => ({
+                    id: m.id,
+                    gameId: m.gameId,
+                    matchSeed: 0,
+                    difficulty: m.difficulty,
+                    playerId: viewer.id,
+                    playerName: m.playerName,
+                    opponentName: m.opponentName,
+                    result: m.result,
+                    scoreSelf: m.scoreSelf,
+                    scoreOpponent: m.scoreOpponent,
+                    durationMs: m.durationMs,
+                    rounds: m.rounds,
+                    lpDelta: m.lpDelta,
+                    xpGained: m.xpGained,
+                    createdAt: new Date(m.createdAt).getTime(),
+                  }),
+                ),
+              );
+            }
+          }
+        } catch {
+          // network blip: leave matches empty rather than crash
         }
+        if (!cancelled) setLoading(false);
+        return;
       }
-      if (cancelled) return;
-      setProfile(resolved);
-      if (resolved) {
-        const ms = await db.matches.listForUser(resolved.id, 12);
-        if (!cancelled) setMatches(ms);
+
+      // Anyone else's profile: we don't have a public lookup endpoint
+      // yet. Fall back to seeded leaderboard data so leaderboard
+      // click-through doesn't 404. Real cross-user profile lookup is
+      // a NEXT_STEPS follow-up.
+      if (!cancelled) {
+        setProfile(makeFallbackProfile(username));
+        setMatches([]);
+        setLoading(false);
       }
-      if (!cancelled) setLoading(false);
-    };
-    void load();
+    })();
     return () => {
       cancelled = true;
     };
