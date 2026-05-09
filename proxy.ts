@@ -44,7 +44,7 @@ function isRateLimited(ip: string): boolean {
   return false;
 }
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const ip = getClientIP(request);
 
   if (isRateLimited(ip)) {
