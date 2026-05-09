@@ -55,15 +55,24 @@ function fakePlayerCount(gameId: string): number {
 export function GameTile({
   game,
   variant = "hub",
-  href = `/matchmaking?game=${game.id}`,
+  href,
   className = "",
 }: Props) {
+  // Solo games (opponent: "ai") have no second player to match against,
+  // so /matchmaking would queue them forever. Route AI games directly
+  // to the game's play route. PvP games (chess) go through matchmaking.
+  // Caller can still override via the href prop.
+  const resolvedHref =
+    href ??
+    (game.opponent === "pvp"
+      ? `/matchmaking?game=${game.id}`
+      : game.routePath);
   const playerCount = fakePlayerCount(game.id);
 
   if (variant === "compact") {
     return (
       <Link
-        href={href}
+        href={resolvedHref}
         className={`group relative overflow-hidden rounded-2xl border border-cyan-400/30 bg-gradient-to-br from-slate-900 via-cyan-950/40 to-black p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-cyan-400/60 hover:shadow-[0_0_28px_-8px_rgba(34,211,238,0.6)] ${className}`}
       >
         <span
@@ -90,7 +99,7 @@ export function GameTile({
 
   return (
     <Link
-      href={href}
+      href={resolvedHref}
       className={`group relative flex h-full flex-col overflow-hidden rounded-3xl border border-cyan-400/20 bg-gradient-to-br from-slate-900 via-cyan-950/30 to-black p-6 transition-all duration-300 hover:-translate-y-1 hover:border-cyan-400/60 hover:shadow-[0_0_50px_-12px_rgba(34,211,238,0.7)] sm:p-7 ${className}`}
     >
       <span
