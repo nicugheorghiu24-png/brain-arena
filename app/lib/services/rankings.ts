@@ -57,6 +57,17 @@ export const rankingsService = {
         xpToNext = Math.round(xpToNext * 1.18);
       }
 
+      // Streak (wins increment; anything else resets) + best-streak.
+      const currentStreak =
+        result === "win" ? profile.currentStreak + 1 : 0;
+      const bestStreak = Math.max(profile.bestStreak, currentStreak);
+
+      // Placement counter — caps at 5; both wins and losses count.
+      const placementMatchesPlayed = Math.min(
+        5,
+        profile.placementMatchesPlayed + 1,
+      );
+
       await tx.profile.update({
         where: { userId },
         data: {
@@ -66,6 +77,9 @@ export const rankingsService = {
           xp,
           level,
           xpToNext,
+          currentStreak,
+          bestStreak,
+          placementMatchesPlayed,
           wins: result === "win" ? { increment: 1 } : undefined,
           losses: result === "loss" ? { increment: 1 } : undefined,
         },

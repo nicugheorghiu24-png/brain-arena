@@ -1,7 +1,7 @@
 import "server-only";
 import { cookies } from "next/headers";
 import { randomBytes } from "node:crypto";
-import bcrypt from "bcryptjs";
+import bcrypt from "bcrypt";
 import { requirePrisma, isDbConfigured, DbNotConfiguredError } from "../prisma";
 
 const SESSION_COOKIE = "ba_session";
@@ -84,7 +84,11 @@ export type CurrentUserWithProfile = CurrentUser & {
     xpToNext: number;
     wins: number;
     losses: number;
+    currentStreak: number;
     bestStreak: number;
+    placementMatchesPlayed: number;
+    isProvisional: boolean;
+    abandonCount: number;
     region: string;
     bio: string;
     joinedAt: string;
@@ -124,6 +128,10 @@ export async function getCurrentUserWithProfile(): Promise<CurrentUserWithProfil
     return null;
   }
   if (!session.user.profile) return null;
+  // Banned users are treated as logged out at the auth layer. The
+  // session row is not deleted (admin can still see who tried) — but
+  // every protected route returns 401 for them.
+  if (session.user.bannedAt) return null;
   const p = session.user.profile;
   return {
     id: session.user.id,
@@ -138,7 +146,11 @@ export async function getCurrentUserWithProfile(): Promise<CurrentUserWithProfil
       xpToNext: p.xpToNext,
       wins: p.wins,
       losses: p.losses,
+      currentStreak: p.currentStreak,
       bestStreak: p.bestStreak,
+      placementMatchesPlayed: p.placementMatchesPlayed,
+      isProvisional: p.placementMatchesPlayed < 5,
+      abandonCount: p.abandonCount,
       region: p.region,
       bio: p.bio,
       joinedAt: p.joinedAt.toISOString(),

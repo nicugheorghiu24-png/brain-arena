@@ -90,9 +90,34 @@ export const profilesService = {
       const losses = profile.losses + (outcome.result === "loss" ? 1 : 0);
       const xpFields = applyXp(profile, outcome.xpGained);
       const { tier, division } = tierForLp(lp);
+
+      // Streak: wins increment, anything else resets. Best-streak is
+      // the lifetime maximum.
+      const currentStreak =
+        outcome.result === "win" ? profile.currentStreak + 1 : 0;
+      const bestStreak = Math.max(profile.bestStreak, currentStreak);
+
+      // Placement: tick up until 5 (per COMPETITIVE_SYSTEMS.md). Both
+      // wins and losses count — placement just measures "have we seen
+      // enough to place this player." Caps at 5.
+      const placementMatchesPlayed = Math.min(
+        5,
+        profile.placementMatchesPlayed + 1,
+      );
+
       const updated = await tx.profile.update({
         where: { userId },
-        data: { lp, wins, losses, tier, division, ...xpFields },
+        data: {
+          lp,
+          wins,
+          losses,
+          tier,
+          division,
+          currentStreak,
+          bestStreak,
+          placementMatchesPlayed,
+          ...xpFields,
+        },
       });
       return updated;
     });

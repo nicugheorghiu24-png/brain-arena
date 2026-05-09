@@ -17,7 +17,11 @@ export type AuthProfile = {
   xpToNext: number;
   wins: number;
   losses: number;
+  currentStreak: number;
   bestStreak: number;
+  placementMatchesPlayed: number;
+  isProvisional: boolean;
+  abandonCount: number;
   region: string;
   bio: string;
   joinedAt: string;
