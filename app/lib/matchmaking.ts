@@ -1022,6 +1022,41 @@ export function initSocketIO(server: HTTPServer) {
     next();
   });
 
+  // Per-socket per-event rate limit. Buckets are reset every minute.
+  // Bounds chess griefing — a single misbehaving client can't flood
+  // make_move with illegal positions or hammer offer_draw. Limits
+  // chosen to be 10× normal play for a generous headroom.
+  const SOCKET_RATE_LIMITS: Record<string, number> = {
+    join_queue: 10,
+    leave_queue: 20,
+    ready: 20,
+    join_match: 20,
+    make_move: 60, // ~1 move/sec for an entire bullet game
+    offer_draw: 5,
+    resign: 5,
+    request_rematch: 5,
+  };
+  function rateOk(socket: Socket, event: string): boolean {
+    const limit = SOCKET_RATE_LIMITS[event];
+    if (!limit) return true;
+    const buckets = (socket.data.rateBuckets ??= new Map<
+      string,
+      { count: number; resetAt: number }
+    >());
+    const now = Date.now();
+    const b = buckets.get(event);
+    if (!b || now > b.resetAt) {
+      buckets.set(event, { count: 1, resetAt: now + 60_000 });
+      return true;
+    }
+    if (b.count >= limit) {
+      socket.emit("rate_limited", { event, limit, retryInMs: b.resetAt - now });
+      return false;
+    }
+    b.count += 1;
+    return true;
+  }
+
   io.on("connection", (socket) => {
     const auth: SocketAuth | null = socket.data.auth ?? null;
     console.log(
@@ -1029,6 +1064,7 @@ export function initSocketIO(server: HTTPServer) {
     );
 
     socket.on("join_queue", (data: { gameId: string }) => {
+      if (!rateOk(socket, "join_queue")) return;
       if (!auth) {
         socket.emit("queue_error", { reason: "Not authenticated." });
         return;
@@ -1054,16 +1090,19 @@ export function initSocketIO(server: HTTPServer) {
     });
 
     socket.on("leave_queue", () => {
+      if (!rateOk(socket, "leave_queue")) return;
       matchmakingQueue.removePlayer(socket.id);
     });
 
     socket.on("ready", () => {
+      if (!rateOk(socket, "ready")) return;
       matchmakingQueue.setPlayerReady(socket.id, true);
     });
 
     socket.on(
       "join_match",
       (data: { matchId: string; spectate?: boolean }) => {
+        if (!rateOk(socket, "join_match")) return;
         if (!data || typeof data.matchId !== "string") return;
         // Spectators allowed without auth; players must be authenticated.
         if (!auth && !data.spectate) {
@@ -1087,6 +1126,7 @@ export function initSocketIO(server: HTTPServer) {
         to: string;
         promotion?: string;
       }) => {
+        if (!rateOk(socket, "make_move")) return;
         if (!auth) {
           socket.emit("move_rejected", { message: "Not authenticated." });
           return;
@@ -1096,6 +1136,7 @@ export function initSocketIO(server: HTTPServer) {
     );
 
     socket.on("offer_draw", (data: { matchId: string }) => {
+      if (!rateOk(socket, "offer_draw")) return;
       if (!auth) return;
       matchmakingQueue.handleDrawOffer(socket, {
         matchId: data.matchId,
@@ -1104,6 +1145,7 @@ export function initSocketIO(server: HTTPServer) {
     });
 
     socket.on("resign", (data: { matchId: string }) => {
+      if (!rateOk(socket, "resign")) return;
       if (!auth) return;
       matchmakingQueue.handleResign(socket, {
         matchId: data.matchId,
@@ -1112,6 +1154,7 @@ export function initSocketIO(server: HTTPServer) {
     });
 
     socket.on("request_rematch", (data: { matchId: string }) => {
+      if (!rateOk(socket, "request_rematch")) return;
       if (!auth) return;
       matchmakingQueue.handleRematchRequest(socket, {
         matchId: data.matchId,
