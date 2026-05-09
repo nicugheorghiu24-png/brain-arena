@@ -6,19 +6,15 @@
 
 ## TL;DR
 
-Brain Arena is **code-complete and verified end-to-end on a production-mode local stack**. The remaining gap to a live `https://playbrainarena.com` is **VPS-side execution of two scripts** that now ship in the repo:
+**Brain Arena is live at https://playbrainarena.com. Private-beta ready.**
 
-```bash
-# On the VPS, ONE TIME:
-sudo LE_EMAIL=you@example.com bash scripts/setup-https.sh
+- Valid Let's Encrypt cert (`R12`, expires 2026-08-07, auto-renewing via certbot.timer)
+- HTTP → HTTPS 301 (apex + www)
+- Auth, sessions, dashboard, games hub, chess, leaderboard, profile all verified end-to-end via the public URL
+- Process supervised by `systemd` (`brain-arena.service`), `Restart=always`, survives ssh disconnect / reboot / crash
+- Production DB cleaned of QA test accounts; only the owner's account remains
 
-# After that, every deploy:
-bash scripts/deploy.sh
-```
-
-Both scripts are idempotent, fail loudly, and self-validate against the smoke-checks that have repeatedly been wrong this week (cookie `Secure` flag, missing API routes, port 3000 contention, wrong `PUBLIC_ORIGIN` protocol, dirty working tree).
-
-I (the engineering lead) cannot SSH into 167.235.73.194 from this session — there's no key authorization on this Windows box (`Permission denied (publickey,password)`). That's the **one thing** I'm asking you for: paste a public key into `~/.ssh/authorized_keys` once and I take over forever after. See **§7 — How to fully unblock me** at the bottom.
+Daily operations from here: `bash scripts/deploy.sh` on the VPS. That's the entire deploy story.
 
 ---
 
@@ -76,7 +72,37 @@ I (the engineering lead) cannot SSH into 167.235.73.194 from this session — th
 
 ---
 
-## 3 · Local validation results (production mode, this session)
+## 3a · Production validation — `https://playbrainarena.com` (2026-05-09 07:00 UTC)
+
+Executed end-to-end after `setup-https.sh` and `deploy.sh` on commit `c8ec1af`.
+
+| Check | Result |
+| --- | --- |
+| Let's Encrypt cert | ✅ issued by R12, valid 2026-05-09 → 2026-08-07; certbot renewal timer scheduled (`certbot.timer` next run 22:36 UTC same day) |
+| `http://playbrainarena.com` | ✅ HTTP 301 → `https://playbrainarena.com/` |
+| `http://www.playbrainarena.com` | ✅ HTTP 301 → `https://www.playbrainarena.com/` |
+| `https://playbrainarena.com/api/health` | ✅ 200, JSON, fresh `uptimeSec` |
+| `https://playbrainarena.com/api/leaderboard` | ✅ JSON with real `Profile` rows |
+| `https://playbrainarena.com/api/matches` (unauth) | ✅ HTTP 401 |
+| Signup against HTTPS — Set-Cookie | ✅ `Secure; HttpOnly; SameSite=lax` (Secure correctly set on HTTPS) |
+| `/api/auth/me` with cookie | ✅ Returns full user + profile object |
+| `/login` with cookie | ✅ Server-side renders "Already signed in" placeholder |
+| `/login` no cookie | ✅ Server-side renders the form ("Sign In") |
+| `/register` with cookie | ✅ "Already signed in" |
+| `/dashboard` with cookie | ✅ Renders real username, "Welcome back", "Bronze" tier |
+| `/games` hub | ✅ Lists Logic Quiz, Memory Match, Reaction Duel, Math Sprint, Chess Arena |
+| `/chess`, `/leaderboard`, `/profile` | ✅ All HTTP 200, render with the layout |
+| `POST /api/matches` with cookie | ✅ Records match server-authoritatively, returns reward + updated profile (`lp=26, xp=120, wins=1, tier=Bronze III`) |
+| Tier promotion | ✅ Profile auto-advanced from Bronze IV → Bronze III after the win |
+| `GET /api/matches` with cookie | ✅ Match history populates with the recorded game |
+| Leaderboard updates | ✅ New users with non-zero LP rank above zero-LP users |
+| `POST /api/auth/logout` | ✅ Returns `{ok:true}`; subsequent `/api/auth/me` returns `{user:null}` |
+| systemd: `brain-arena.service` | ✅ enabled (starts on boot), active, `Restart=always` |
+| Process supervision | ✅ Site responds to public probe after SSH closed; the process is owned by systemd, not the SSH session |
+
+After validation, the 8 test accounts created during QA were deleted via `psql` (cascade-deleted profiles, sessions, match_results, seen_questions, achievements, wallets, transactions). 2 orphaned `Match` rows (no remaining MatchResults) were also deleted. The `users` table now contains exactly 1 row: `nicugheorghiu24@gmail.com` (`nicusor`, the owner). The leaderboard reflects this state.
+
+## 3b · Local validation results (production mode, before push)
 
 | Check | Result |
 | --- | --- |
@@ -102,25 +128,9 @@ I (the engineering lead) cannot SSH into 167.235.73.194 from this session — th
 
 ---
 
-## 4 · Production validation — what I will run myself
+## 4 · Production validation — done
 
-The moment a deploy lands on `playbrainarena.com`, I'll run this from this session and produce the validation report:
-
-```bash
-# Independent (off-server) checks against the public URL
-curl -s https://playbrainarena.com/api/health             # uptime fresh, status:ok
-curl -s -i -X POST https://playbrainarena.com/api/auth/signup \
-  -H "Content-Type: application/json" \
-  -d '{"email":"…","password":"…","username":"…"}'       # Set-Cookie has Secure, no leak
-curl -s -b … https://playbrainarena.com/api/auth/me      # full user+profile
-curl -s -b … https://playbrainarena.com/login            # "Already signed in"
-curl -s     https://playbrainarena.com/login             # "Sign In" form
-curl -s -b … https://playbrainarena.com/dashboard         # real username
-curl -s -i  http://playbrainarena.com/api/health         # 301 → https
-curl -s     https://playbrainarena.com/api/leaderboard   # JSON, real rows
-```
-
-I'll add the results to this file once the deploy lands and the URL responds.
+Already executed and documented above (§3a). Brain Arena is live and fully functional on HTTPS at `https://playbrainarena.com`, with supervised process management and auto-renewing TLS.
 
 ---
 
@@ -152,24 +162,13 @@ I'll add the results to this file once the deploy lands and the URL responds.
 
 ---
 
-## 7 · How to fully unblock me
+## 7 · How the engineering lead operates from here
 
-The one outstanding ask. Two options:
-
-### Option A — SSH key (60 seconds, recommended)
-
-I generate an ed25519 keypair on this Windows machine. You paste the **public** half into `/root/.ssh/authorized_keys` on the VPS once. After that I can SSH in directly, run `scripts/setup-https.sh` and `scripts/deploy.sh` myself, validate the public URL, and write up results — all without you executing anything.
-
-I'll generate and paste the public key in my next message if you say "go option A."
-
-### Option B — You run two commands yourself
+SSH access was granted via the dedicated ed25519 keypair `~/.ssh/id_brain_arena_deploy{,.pub}` on the Windows engineering machine; the public key is in `/root/.ssh/authorized_keys` on the VPS. No further owner intervention is needed for routine deploys, monitoring, or incident response. Future sessions can:
 
 ```bash
-# On the VPS, as root, after pulling the latest code:
-cd ~/brain-arena
-git pull --ff-only origin main   # gets the new scripts
-sudo LE_EMAIL=you@example.com bash scripts/setup-https.sh   # one-time
-bash scripts/deploy.sh                                       # standard deploy
+# from the engineering Windows host
+ssh -i ~/.ssh/id_brain_arena_deploy root@167.235.73.194 'cd ~/brain-arena && bash scripts/deploy.sh'
 ```
 
-Either way ends with `https://playbrainarena.com` validated end-to-end. Option A means I can also handle every future deploy and incident response autonomously.
+If the deploy key is ever rotated or revoked, generate a new one with `ssh-keygen -t ed25519 -f ~/.ssh/id_brain_arena_deploy -N "" -C ...` and replace the line in `/root/.ssh/authorized_keys`.
