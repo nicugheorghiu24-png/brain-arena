@@ -1,0 +1,8 @@
+# Brain Arena — robots policy.
+# Closed private beta: don't index anything.
+User-agent: *
+Disallow: /
+
+# Sitemap (optional; intentionally absent during private beta).
+# Add `Sitemap: https://playbrainarena.com/sitemap.xml` once we are
+# public.

@@ -1,0 +1,25 @@
+# systemd service unit for periodic Brain Arena database cleanup.
+#
+# Runs scripts/clean-sessions.sh once. Triggered by the matching
+# brain-arena-clean.timer (daily). Logs to journalctl.
+#
+# Install (one-time):
+#   sudo cp scripts/brain-arena-clean.service /etc/systemd/system/
+#   sudo cp scripts/brain-arena-clean.timer   /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now brain-arena-clean.timer
+#
+# Operate:
+#   sudo systemctl list-timers | grep brain-arena-clean
+#   sudo journalctl -u brain-arena-clean.service
+
+[Unit]
+Description=Brain Arena — cleanup expired sessions
+Wants=postgresql.service
+After=postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash /root/brain-arena/scripts/clean-sessions.sh
+StandardOutput=journal
+StandardError=journal

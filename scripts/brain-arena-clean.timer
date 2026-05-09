@@ -1,0 +1,18 @@
+# systemd timer for the Brain Arena cleanup service.
+#
+# Fires daily, ~03:30 UTC. Persistent=true means a missed run (e.g.
+# server was off) catches up at next boot. RandomizedDelaySec=600
+# spreads load if multiple VPSes ever run this from the same image.
+
+[Unit]
+Description=Brain Arena — daily session cleanup timer
+Requires=brain-arena-clean.service
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=600
+Persistent=true
+Unit=brain-arena-clean.service
+
+[Install]
+WantedBy=timers.target

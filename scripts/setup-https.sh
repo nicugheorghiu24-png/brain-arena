@@ -49,10 +49,13 @@ log "2. install nginx + certbot if needed"
 DEBIAN_FRONTEND=noninteractive apt-get update -qq
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nginx certbot python3-certbot-nginx
 
-log "3. install brain-arena nginx site"
+log "3. install brain-arena nginx site + security headers"
 mkdir -p /var/www/certbot
 cp "$PROJECT_ROOT/scripts/nginx-brain-arena.conf" /etc/nginx/sites-available/brain-arena
 ln -sf /etc/nginx/sites-available/brain-arena /etc/nginx/sites-enabled/brain-arena
+# Server-wide security headers (HSTS, X-Frame-Options, etc.) loaded
+# at the http level via conf.d.
+cp "$PROJECT_ROOT/scripts/nginx-brain-arena-headers.conf" /etc/nginx/conf.d/brain-arena-headers.conf
 # Don't leave the default landing page enabled
 rm -f /etc/nginx/sites-enabled/default
 nginx -t
