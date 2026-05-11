@@ -239,11 +239,27 @@ export async function POST(req: Request) {
       });
     }
 
-    const updatedProfile = await profilesService.applyMatchOutcome(user.id, {
+    const outcomeApplied = await profilesService.applyMatchOutcome(user.id, {
       result: input.result,
       lpDelta,
       xpGained: baseReward.xpGained,
     });
+    const updatedProfile = outcomeApplied?.profile ?? null;
+    // The actually-applied delta — what the user's lp ACTUALLY moved
+    // by, after the 1.5× placement boost and the 0-floor clamp.
+    // Different from the unboosted `lpDelta` we computed above. This
+    // is what the response and the MatchResult should record so the
+    // user sees the same number in dashboard / history / toast.
+    const appliedLpDelta = outcomeApplied?.appliedLpDelta ?? lpDelta;
+
+    // Sync MatchResult.lpDelta with what was actually applied so the
+    // match history shows the boosted value, not the base.
+    if (appliedLpDelta !== lpDelta) {
+      await prisma.matchResult.updateMany({
+        where: { matchId: created.id, userId: user.id },
+        data: { lpDelta: appliedLpDelta },
+      });
+    }
 
     // Auto-award achievements based on the new state. Idempotent —
     // duplicate awards are no-ops via Prisma upsert.
@@ -261,7 +277,7 @@ export async function POST(req: Request) {
       ok: true,
       match: { id: created.id },
       reward: {
-        lpDelta,
+        lpDelta: appliedLpDelta,
         xpGained: baseReward.xpGained,
       },
       validation: {

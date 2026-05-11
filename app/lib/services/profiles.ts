@@ -80,6 +80,17 @@ export const profilesService = {
     });
   },
 
+  /**
+   * Apply a finished match's outcome to the profile.
+   *
+   * Returns `{ profile, appliedLpDelta }` so callers know exactly
+   * how much LP was actually applied (which is NOT necessarily
+   * `outcome.lpDelta` — placement matches scale it 1.5×, and
+   * clamping at 0 can shrink a big negative). API responses and
+   * MatchResult rows should record `appliedLpDelta`, not the
+   * unboosted input value, so the user sees consistent numbers
+   * across the response, the dashboard, and match history.
+   */
   async applyMatchOutcome(userId: string, outcome: Outcome) {
     const prisma = requirePrisma();
     return prisma.$transaction(async (tx) => {
@@ -90,13 +101,16 @@ export const profilesService = {
       // — gets the player to their real tier faster in either
       // direction. Per COMPETITIVE_SYSTEMS.md placement matches spec.
       const placementBoost = profile.placementMatchesPlayed < 5 ? 1.5 : 1;
-      const adjustedLpDelta = Math.round(outcome.lpDelta * placementBoost);
+      const scaledLpDelta = Math.round(outcome.lpDelta * placementBoost);
+      // The actually-applied delta is the scaled value clamped so
+      // we never write a negative lp.
+      const newLp = Math.max(0, profile.lp + scaledLpDelta);
+      const appliedLpDelta = newLp - profile.lp;
 
-      const lp = Math.max(0, profile.lp + adjustedLpDelta);
       const wins = profile.wins + (outcome.result === "win" ? 1 : 0);
       const losses = profile.losses + (outcome.result === "loss" ? 1 : 0);
       const xpFields = applyXp(profile, outcome.xpGained);
-      const { tier, division } = tierForLp(lp);
+      const { tier, division } = tierForLp(newLp);
 
       // Streak: wins increment, anything else resets. Best-streak is
       // the lifetime maximum.
@@ -115,7 +129,7 @@ export const profilesService = {
       const updated = await tx.profile.update({
         where: { userId },
         data: {
-          lp,
+          lp: newLp,
           wins,
           losses,
           tier,
@@ -126,7 +140,7 @@ export const profilesService = {
           ...xpFields,
         },
       });
-      return updated;
+      return { profile: updated, appliedLpDelta };
     });
   },
 };
