@@ -21,6 +21,9 @@
  */
 
 import { mathValidator, type MathInputs } from "./math";
+import { memoryValidator, type MemoryInputs } from "./memory";
+import { reactionValidator, type ReactionInputs } from "./reaction";
+import { quizValidator, type QuizInputs } from "./quiz";
 
 export type ValidationContext = {
   gameId: string;
@@ -46,13 +49,13 @@ export type Validator = (
  * Discriminated input type. Each entry is the inputs shape for one
  * gameId, exactly as the client sends it. New games append here.
  */
-export type GameInputs = MathInputs; // | MemoryInputs | ReactionInputs | …
+export type GameInputs = MathInputs | MemoryInputs | ReactionInputs | QuizInputs;
 
 const REGISTRY: Record<string, Validator> = {
   math: mathValidator,
-  // memory:   memoryValidator,    // TODO M2
-  // reaction: reactionValidator,  // TODO M2
-  // quiz:     quizValidator,      // TODO M2
+  memory: memoryValidator,
+  reaction: reactionValidator,
+  quiz: quizValidator,
 };
 
 export function getValidator(gameId: string): Validator | null {

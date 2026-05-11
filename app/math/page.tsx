@@ -14,6 +14,8 @@ import { useGameTimer } from "../games/hooks/useGameTimer";
 import { computeReward } from "../games/reward";
 import { getGame } from "../games/registry";
 import type { RewardSummary } from "../games/types";
+import type { AchievementRecord } from "../lib/games/achievements-catalog";
+import type { MatchMilestones } from "../lib/matchClient";
 import {
   resolveSeenUserId,
   markQuestionsAsSeen,
@@ -60,6 +62,10 @@ export default function MathPage() {
   } | null>(null);
   const [startedAt] = useState<number>(() => Date.now());
   const [reward, setReward] = useState<RewardSummary | null>(null);
+  const [milestones, setMilestones] = useState<MatchMilestones | null>(null);
+  const [achievementsUnlocked, setAchievementsUnlocked] = useState<
+    AchievementRecord[]
+  >([]);
   const resultFiredRef = useRef<boolean>(false);
   // Per-answer input stream. Recorded for server-side replay
   // validation (see app/lib/games/replay/math.ts). The ref holds
@@ -225,8 +231,10 @@ export default function MathPage() {
       setReward({
         lpDelta: recorded.reward.lpDelta,
         xpGained: recorded.reward.xpGained,
-        levelUp: false,
+        levelUp: recorded.milestones?.leveledUp ?? false,
       });
+      setMilestones(recorded.milestones);
+      setAchievementsUnlocked(recorded.achievementsUnlocked);
     }, 0);
     return () => clearTimeout(id);
   }, [
@@ -281,6 +289,8 @@ export default function MathPage() {
           opponentName={OPPONENT_NAME}
           score={score}
           reward={reward ?? undefined}
+          milestones={milestones}
+          achievementsUnlocked={achievementsUnlocked}
         />
       </main>
     );

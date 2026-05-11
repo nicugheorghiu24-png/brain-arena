@@ -22,6 +22,7 @@ import { useOpponentBot } from "../games/hooks/useOpponentBot";
 import { computeReward } from "../games/reward";
 import { getGame } from "../games/registry";
 import type { RewardSummary } from "../games/types";
+import type { AchievementRecord } from "../lib/games/achievements-catalog";
 import {
   resolveSeenUserId,
   markQuestionsAsSeen,
@@ -30,7 +31,15 @@ import {
 import {
   generateDeterministicQuestionSet,
 } from "../games/match";
-import { recordSoloMatchOutcome } from "../lib/matchClient";
+import { recordSoloMatchOutcome, type MatchMilestones } from "../lib/matchClient";
+
+// One answered question, recorded for server-side replay validation.
+type QuizAnswerInput = {
+  questionId: string;
+  chosenIndex: number;
+  correctIndex: number;
+  ms: number;
+};
 
 type Selection = { index: number; correct: boolean } | null;
 
@@ -61,7 +70,20 @@ function ArenaInner() {
   const [selection, setSelection] = useState<Selection>(null);
   const [startedAt] = useState<number>(() => Date.now());
   const [reward, setReward] = useState<RewardSummary | null>(null);
+  const [milestones, setMilestones] = useState<MatchMilestones | null>(null);
+  const [achievementsUnlocked, setAchievementsUnlocked] = useState<
+    AchievementRecord[]
+  >([]);
   const resultFiredRef = useRef<boolean>(false);
+
+  // Replay-validation input stream. One entry per question the
+  // player answered (or auto-resolved on timer expiry).
+  const answersRef = useRef<QuizAnswerInput[]>([]);
+  // Wall-clock at the moment the current question appeared.
+  const questionShownAtRef = useRef<number>(0);
+  useEffect(() => {
+    questionShownAtRef.current = Date.now();
+  }, [questionIdx]);
 
   const meta = getGame(GAME_ID);
   const difficulty = meta?.defaultDifficulty ?? "medium";
@@ -97,7 +119,21 @@ function ArenaInner() {
     durationSec: QUESTION_SECONDS,
     paused,
     onTimeout: () => {
-      setSelection((cur) => cur ?? { index: -1, correct: false });
+      setSelection((cur) => {
+        if (cur !== null) return cur;
+        // Auto-resolved on timeout — record as a no-pick for replay
+        // validation. chosenIndex=-1 never matches any correctIndex
+        // so the validator's score reconciliation stays correct.
+        if (question) {
+          answersRef.current.push({
+            questionId: question.id,
+            chosenIndex: -1,
+            correctIndex: question.correctIndex,
+            ms: QUESTION_SECONDS * 1000,
+          });
+        }
+        return { index: -1, correct: false };
+      });
     },
   });
 
@@ -163,6 +199,7 @@ function ArenaInner() {
           scoreOpponent: score.opponent,
           opponentName: OPPONENT_NAME,
           matchSeed: Number(matchSeed),
+          inputs: { answers: answersRef.current },
         },
         {
           userId,
@@ -175,8 +212,10 @@ function ArenaInner() {
       setReward({
         lpDelta: recorded.reward.lpDelta,
         xpGained: recorded.reward.xpGained,
-        levelUp: false,
+        levelUp: recorded.milestones?.leveledUp ?? false,
       });
+      setMilestones(recorded.milestones);
+      setAchievementsUnlocked(recorded.achievementsUnlocked);
     }, 0);
     return () => clearTimeout(id);
   }, [
@@ -194,6 +233,14 @@ function ArenaInner() {
   function pickAnswer(idx: number) {
     if (paused || !question) return;
     const correct = idx === question.correctIndex;
+    // eslint-disable-next-line react-hooks/purity -- click handler, not render
+    const ms = Math.max(0, Date.now() - questionShownAtRef.current);
+    answersRef.current.push({
+      questionId: question.id,
+      chosenIndex: idx,
+      correctIndex: question.correctIndex,
+      ms,
+    });
     setSelection({ index: idx, correct });
     if (correct) scoreSelf();
   }
@@ -217,6 +264,8 @@ function ArenaInner() {
           opponentName={OPPONENT_NAME}
           score={score}
           reward={reward ?? undefined}
+          milestones={milestones}
+          achievementsUnlocked={achievementsUnlocked}
         />
       </main>
     );

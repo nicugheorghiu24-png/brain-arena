@@ -6,6 +6,8 @@ import { io, Socket } from "socket.io-client";
 import { ChessBoard } from "./components/ChessBoard";
 import { useAuth } from "../components/AuthProvider";
 import { useToast } from "../components/ui/Toast";
+import type { AchievementRecord } from "../lib/games/achievements-catalog";
+import type { MatchMilestones } from "../lib/matchClient";
 
 type CurrentUser = {
   id: string;
@@ -182,6 +184,10 @@ function ChessMatch({
     deadline: number;
   } | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [milestones, setMilestones] = useState<MatchMilestones | null>(null);
+  const [achievementsUnlocked, setAchievementsUnlocked] = useState<
+    AchievementRecord[]
+  >([]);
   const socketRef = useRef<Socket | null>(null);
 
   const isSpectator = useMemo(() => {
@@ -308,6 +314,17 @@ function ChessMatch({
         );
         setPhase("ended");
         setOpponentDisconnect(null);
+        // Per-player milestones + achievements. Spectators receive
+        // a payload WITHOUT these fields, so they'll stay null/empty
+        // and the banner won't render.
+        if (payload?.milestones) {
+          setMilestones(payload.milestones as MatchMilestones);
+        }
+        if (Array.isArray(payload?.achievementsUnlocked)) {
+          setAchievementsUnlocked(
+            payload.achievementsUnlocked as AchievementRecord[],
+          );
+        }
       });
 
       socket.on(
@@ -615,23 +632,29 @@ function ChessMatch({
                 )}
               </div>
               {result && (
-                <div className="rounded-2xl border border-fuchsia-400/30 bg-fuchsia-500/10 p-3 text-fuchsia-100">
-                  <p className="font-semibold uppercase tracking-widest text-fuchsia-200">
-                    {result.outcome === "draw"
-                      ? "Draw"
-                      : isSpectator
-                      ? result.winnerId === matchState.white.userId
-                        ? `${matchState.white.username} wins`
-                        : `${matchState.black.username} wins`
-                      : result.winnerId === user?.id
-                      ? "Victory"
-                      : "Defeat"}
-                  </p>
-                  {result.reason && (
-                    <p className="mt-1 text-sm text-fuchsia-200/80">
-                      {result.reason}
+                <div className="space-y-3">
+                  <div className="rounded-2xl border border-fuchsia-400/30 bg-fuchsia-500/10 p-3 text-fuchsia-100">
+                    <p className="font-semibold uppercase tracking-widest text-fuchsia-200">
+                      {result.outcome === "draw"
+                        ? "Draw"
+                        : isSpectator
+                        ? result.winnerId === matchState.white.userId
+                          ? `${matchState.white.username} wins`
+                          : `${matchState.black.username} wins`
+                        : result.winnerId === user?.id
+                        ? "Victory"
+                        : "Defeat"}
                     </p>
-                  )}
+                    {result.reason && (
+                      <p className="mt-1 text-sm text-fuchsia-200/80">
+                        {result.reason}
+                      </p>
+                    )}
+                  </div>
+                  <ChessMatchEndExtras
+                    milestones={milestones}
+                    achievementsUnlocked={achievementsUnlocked}
+                  />
                 </div>
               )}
             </div>
@@ -773,6 +796,83 @@ function ClockPanel({
       )}
     </div>
   );
+}
+
+function ChessMatchEndExtras({
+  milestones,
+  achievementsUnlocked,
+}: {
+  milestones: MatchMilestones | null;
+  achievementsUnlocked: AchievementRecord[];
+}) {
+  const milestoneItems = milestonesToChessLabels(milestones);
+  const showAchievements = achievementsUnlocked.length > 0;
+  if (milestoneItems.length === 0 && !showAchievements) return null;
+  return (
+    <div className="space-y-3">
+      {milestoneItems.length > 0 && (
+        <div className="rounded-2xl border border-amber-400/40 bg-amber-500/10 p-3">
+          <p className="text-[10px] uppercase tracking-[0.25em] text-amber-200">
+            Milestones
+          </p>
+          <ul className="mt-2 flex flex-wrap gap-2">
+            {milestoneItems.map((m) => (
+              <li
+                key={m.key}
+                className="flex items-center gap-1.5 rounded-full border border-amber-300/40 bg-amber-400/10 px-3 py-1 text-xs font-bold text-amber-100"
+              >
+                <span aria-hidden>{m.icon}</span>
+                {m.label}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {showAchievements && (
+        <div className="rounded-2xl border border-fuchsia-400/40 bg-fuchsia-500/10 p-3">
+          <p className="text-[10px] uppercase tracking-[0.25em] text-fuchsia-200">
+            Achievement{achievementsUnlocked.length > 1 ? "s" : ""} unlocked
+          </p>
+          <ul className="mt-2 flex flex-col gap-2">
+            {achievementsUnlocked.map((a) => (
+              <li
+                key={a.id}
+                className="flex items-center gap-3 rounded-xl border border-fuchsia-300/30 bg-fuchsia-400/10 px-3 py-2"
+              >
+                <span aria-hidden className="text-2xl">
+                  {a.icon}
+                </span>
+                <div className="flex-1">
+                  <div className="text-sm font-extrabold text-white">
+                    {a.title}
+                  </div>
+                  <div className="text-xs text-fuchsia-100/80">
+                    {a.description}
+                  </div>
+                </div>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-fuchsia-200/80">
+                  {a.rarity}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function milestonesToChessLabels(
+  m: MatchMilestones | null,
+): Array<{ key: string; icon: string; label: string }> {
+  if (!m) return [];
+  const out: Array<{ key: string; icon: string; label: string }> = [];
+  if (m.firstWinEver) out.push({ key: "first", icon: "🏆", label: "First win" });
+  if (m.tierPromoted) out.push({ key: "tier", icon: "📈", label: "Promoted" });
+  if (m.leveledUp) out.push({ key: "level", icon: "⬆️", label: "Level up" });
+  if (m.newStreakRecord)
+    out.push({ key: "streak", icon: "🔥", label: "New streak record" });
+  return out;
 }
 
 export default function ChessPage() {

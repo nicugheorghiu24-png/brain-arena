@@ -13,10 +13,21 @@ import { useDuelScore } from "../games/hooks/useDuelScore";
 import { computeReward } from "../games/reward";
 import { getGame } from "../games/registry";
 import type { RewardSummary } from "../games/types";
+import type { AchievementRecord } from "../lib/games/achievements-catalog";
 import { MemoryCard } from "../components/games/memory/MemoryCard";
 import { createMatchSeed } from "../games/match";
 import { resolveSeenUserId } from "../games/questions";
-import { recordSoloMatchOutcome } from "../lib/matchClient";
+import { recordSoloMatchOutcome, type MatchMilestones } from "../lib/matchClient";
+
+// A single player turn — recorded for server-side replay
+// validation. cardA / cardB are slot indices (0..15) and ms is
+// time elapsed between selecting cardA and resolving cardB.
+type PlayerTurn = {
+  cardA: number;
+  cardB: number;
+  ms: number;
+  matched: boolean;
+};
 
 const GAME_ID = "memory";
 const SYMBOLS = ["🧠", "⚡", "💎", "🔥", "🌐", "🎯", "🛡️", "⚔️"] as const;
@@ -118,7 +129,20 @@ export default function MemoryPage() {
   const [startedAt] = useState<number>(() => Date.now());
   const [reward, setReward] = useState<RewardSummary | null>(null);
   const [matchSeed, setMatchSeed] = useState<number>(0);
+  const [milestones, setMilestones] = useState<MatchMilestones | null>(null);
+  const [achievementsUnlocked, setAchievementsUnlocked] = useState<
+    AchievementRecord[]
+  >([]);
   const resultFiredRef = useRef<boolean>(false);
+
+  // Replay-validation input stream. Each completed PLAYER turn is
+  // pushed here when its two cards resolve (match-or-flip-back). Bot
+  // turns are excluded — the server only validates the player's
+  // claimed score against their own turns.
+  const turnsRef = useRef<PlayerTurn[]>([]);
+  // Wall-clock timestamp at the moment the player flipped their
+  // FIRST card this turn. Used to compute per-turn ms.
+  const turnStartedAtRef = useRef<number>(0);
 
   // Match seed (for record-keeping; this game doesn't use seeded
   // questions). Generated client-side once to avoid SSR/CSR mismatch.
@@ -144,6 +168,15 @@ export default function MemoryPage() {
     if (cards.length === 0) return;
     const [a, b] = selected;
     const matched = cards[a].value === cards[b].value;
+
+    // Record this turn's outcome for replay validation. We snapshot
+    // the ms BEFORE the reveal-flip-back delay so the recorded ms is
+    // pick-time, not pick-time + animation. Only player turns are
+    // recorded — bot turns aren't part of replay validation.
+    if (turn === "you") {
+      const ms = Math.max(0, Date.now() - turnStartedAtRef.current);
+      turnsRef.current.push({ cardA: a, cardB: b, ms, matched });
+    }
 
     const id = setTimeout(() => {
       setCards((prev) =>
@@ -287,6 +320,7 @@ export default function MemoryPage() {
           scoreOpponent: score.opponent,
           opponentName: OPPONENT_NAME,
           matchSeed,
+          inputs: { turns: turnsRef.current },
         },
         {
           userId,
@@ -299,8 +333,10 @@ export default function MemoryPage() {
       setReward({
         lpDelta: recorded.reward.lpDelta,
         xpGained: recorded.reward.xpGained,
-        levelUp: false,
+        levelUp: recorded.milestones?.leveledUp ?? false,
       });
+      setMilestones(recorded.milestones);
+      setAchievementsUnlocked(recorded.achievementsUnlocked);
     }, 0);
     return () => clearTimeout(id);
   }, [
@@ -320,6 +356,12 @@ export default function MemoryPage() {
     if (selected.length >= 2) return;
     const card = cards[id];
     if (!card || card.matched || card.flipped) return;
+
+    // First click of this player turn — stamp the timer.
+    if (selected.length === 0) {
+      // eslint-disable-next-line react-hooks/purity -- click handler, not render
+      turnStartedAtRef.current = Date.now();
+    }
 
     setCards((prev) =>
       prev.map((c, i) => (i === id ? { ...c, flipped: true } : c)),
@@ -358,6 +400,8 @@ export default function MemoryPage() {
           opponentName={OPPONENT_NAME}
           score={score}
           reward={reward ?? undefined}
+          milestones={milestones}
+          achievementsUnlocked={achievementsUnlocked}
         />
       </main>
     );

@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { Avatar } from "../../components/ui/Avatar";
+import type { AchievementRecord } from "../../lib/games/achievements-catalog";
+import type { MatchMilestones } from "../../lib/matchClient";
 import type { DuelScore, MatchResult, RewardSummary } from "../types";
 
 type Props = {
@@ -8,6 +10,20 @@ type Props = {
   opponentName: string;
   score: DuelScore;
   reward?: RewardSummary;
+  /**
+   * Milestones the server reports for this match — first win ever,
+   * tier promotion, level up, new streak record. When present and
+   * any flag is true, ResultScreen renders a banner above the play
+   * controls. Null/undefined → no banner (e.g., the API call
+   * fell back to local mode, or none triggered).
+   */
+  milestones?: MatchMilestones | null;
+  /**
+   * Achievements freshly unlocked by this match — only fresh ones,
+   * never previously-held ones. ResultScreen renders each as a chip
+   * with icon + title. Empty array → no chips.
+   */
+  achievementsUnlocked?: AchievementRecord[];
   playAgainHref?: string;
   homeHref?: string;
   className?: string;
@@ -31,12 +47,17 @@ export function ResultScreen({
   opponentName,
   score,
   reward,
+  milestones,
+  achievementsUnlocked,
   playAgainHref = "/matchmaking",
   homeHref = "/dashboard",
   className = "",
 }: Props) {
   const won = result === "win";
   const tied = result === "draw";
+  const milestoneLabels = milestonesToLabels(milestones);
+  const showAchievements =
+    achievementsUnlocked !== undefined && achievementsUnlocked.length > 0;
 
   return (
     <div
@@ -86,6 +107,56 @@ export function ResultScreen({
         </div>
       )}
 
+      {milestoneLabels.length > 0 && (
+        <div className="mt-5 rounded-2xl border border-amber-400/40 bg-gradient-to-r from-amber-500/15 via-amber-400/10 to-orange-500/15 px-4 py-3 text-left">
+          <div className="text-xs uppercase tracking-widest text-amber-200">
+            Milestones
+          </div>
+          <ul className="mt-1 flex flex-wrap gap-2">
+            {milestoneLabels.map((m) => (
+              <li
+                key={m.key}
+                className="flex items-center gap-1.5 rounded-full border border-amber-300/40 bg-amber-400/10 px-3 py-1 text-xs font-bold text-amber-100"
+              >
+                <span aria-hidden>{m.icon}</span>
+                {m.label}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {showAchievements && (
+        <div className="mt-4 rounded-2xl border border-fuchsia-400/40 bg-gradient-to-r from-fuchsia-500/15 via-violet-500/10 to-cyan-500/15 px-4 py-3 text-left">
+          <div className="text-xs uppercase tracking-widest text-fuchsia-200">
+            Achievement{achievementsUnlocked!.length > 1 ? "s" : ""} unlocked
+          </div>
+          <ul className="mt-2 flex flex-col gap-2">
+            {achievementsUnlocked!.map((a) => (
+              <li
+                key={a.id}
+                className="flex items-center gap-3 rounded-xl border border-fuchsia-300/30 bg-fuchsia-400/10 px-3 py-2"
+              >
+                <span aria-hidden className="text-2xl">
+                  {a.icon}
+                </span>
+                <div className="flex-1">
+                  <div className="text-sm font-extrabold text-white">
+                    {a.title}
+                  </div>
+                  <div className="text-xs text-fuchsia-100/80">
+                    {a.description}
+                  </div>
+                </div>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-fuchsia-200/80">
+                  {a.rarity}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div className="mt-8 flex flex-col gap-2 sm:flex-row sm:justify-center">
         <Link
           href={playAgainHref}
@@ -102,6 +173,19 @@ export function ResultScreen({
       </div>
     </div>
   );
+}
+
+function milestonesToLabels(
+  m: MatchMilestones | null | undefined,
+): Array<{ key: string; icon: string; label: string }> {
+  if (!m) return [];
+  const out: Array<{ key: string; icon: string; label: string }> = [];
+  if (m.firstWinEver) out.push({ key: "first", icon: "🏆", label: "First win" });
+  if (m.tierPromoted) out.push({ key: "tier", icon: "📈", label: "Promoted" });
+  if (m.leveledUp) out.push({ key: "level", icon: "⬆️", label: "Level up" });
+  if (m.newStreakRecord)
+    out.push({ key: "streak", icon: "🔥", label: "New streak record" });
+  return out;
 }
 
 function RewardChip({

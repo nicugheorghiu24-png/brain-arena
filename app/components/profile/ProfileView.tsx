@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "../AuthProvider";
 import {
-  FAKE_ACHIEVEMENTS,
   FAKE_LEADERBOARD,
   rarityClass,
   rarityLabel,
@@ -14,6 +13,7 @@ import { TierBadge } from "../ui/TierBadge";
 import { ProgressBar } from "../ui/ProgressBar";
 import type { MatchRecord, ProfileRecord } from "../../lib/db";
 import { listGames } from "../../games/registry";
+import { ACHIEVEMENT_CATALOG } from "../../lib/games/achievements-catalog";
 
 type Tab = "achievements" | "history";
 
@@ -109,6 +109,7 @@ export function ProfileView({ username }: Props) {
 
   const [profile, setProfile] = useState<ProfileRecord | null>(null);
   const [matches, setMatches] = useState<MatchRecord[]>([]);
+  const [unlockedIds, setUnlockedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>("achievements");
 
@@ -117,7 +118,8 @@ export function ProfileView({ username }: Props) {
     void (async () => {
       // Own profile: data is already in the AuthProvider context
       // (server-side cookies() in the root layout populates it). No
-      // fetch needed for the profile fields.
+      // fetch needed for the profile fields. Match history comes from
+      // /api/matches; achievements from viewer.unlockedAchievementIds.
       if (isOwn && viewer && viewer.profile) {
         const own: ProfileRecord = {
           id: viewer.id,
@@ -139,6 +141,7 @@ export function ProfileView({ username }: Props) {
         };
         if (cancelled) return;
         setProfile(own);
+        setUnlockedIds(new Set(viewer.unlockedAchievementIds ?? []));
 
         // Own match history via the server-authoritative endpoint.
         try {
@@ -195,13 +198,104 @@ export function ProfileView({ username }: Props) {
         return;
       }
 
-      // Anyone else's profile: we don't have a public lookup endpoint
-      // yet. Fall back to seeded leaderboard data so leaderboard
-      // click-through doesn't 404. Real cross-user profile lookup is
-      // a NEXT_STEPS follow-up.
+      // Anyone else's profile: hit the public lookup endpoint. Falls
+      // back to FAKE_LEADERBOARD seed if the username is a seeded
+      // demo entry (so leaderboard click-through to demo rows still
+      // works visually).
+      try {
+        const res = await fetch(
+          `/api/profile/${encodeURIComponent(username)}`,
+          { cache: "no-store" },
+        );
+        if (res.ok) {
+          const data = (await res.json()) as {
+            ok: true;
+            profile: {
+              username: string;
+              tier: string;
+              division: string;
+              lp: number;
+              level: number;
+              xp: number;
+              xpToNext: number;
+              wins: number;
+              losses: number;
+              currentStreak: number;
+              bestStreak: number;
+              region: string;
+              bio: string;
+              joinedAt: string;
+              favoriteGameId: string | null;
+            };
+            unlockedAchievements: Array<{ id: string; unlockedAt: string }>;
+            recentMatches: Array<{
+              id: string;
+              gameId: string;
+              difficulty: string;
+              durationMs: number;
+              result: "win" | "loss" | "draw";
+              scoreSelf: number;
+              scoreOpponent: number;
+              opponentName: string;
+              lpDelta: number;
+              xpGained: number;
+              createdAt: string;
+            }>;
+          };
+          if (cancelled) return;
+          setProfile({
+            id: `pub:${data.profile.username.toLowerCase()}`,
+            username: data.profile.username,
+            tier: data.profile.tier as ProfileRecord["tier"],
+            division: data.profile.division as ProfileRecord["division"],
+            lp: data.profile.lp,
+            level: data.profile.level,
+            xp: data.profile.xp,
+            xpToNext: data.profile.xpToNext,
+            bio: data.profile.bio,
+            region: data.profile.region,
+            joinedAt: data.profile.joinedAt.slice(0, 10),
+            wins: data.profile.wins,
+            losses: data.profile.losses,
+            bestStreak: data.profile.bestStreak,
+            favoriteGameId: data.profile.favoriteGameId ?? undefined,
+          });
+          setUnlockedIds(new Set(data.unlockedAchievements.map((a) => a.id)));
+          setMatches(
+            data.recentMatches.map(
+              (m): MatchRecord => ({
+                id: m.id,
+                gameId: m.gameId,
+                matchSeed: 0,
+                difficulty: m.difficulty,
+                playerId: `pub:${data.profile.username.toLowerCase()}`,
+                playerName: data.profile.username,
+                opponentName: m.opponentName,
+                result: m.result,
+                scoreSelf: m.scoreSelf,
+                scoreOpponent: m.scoreOpponent,
+                durationMs: m.durationMs,
+                rounds: 0,
+                lpDelta: m.lpDelta,
+                xpGained: m.xpGained,
+                createdAt: new Date(m.createdAt).getTime(),
+              }),
+            ),
+          );
+          if (!cancelled) setLoading(false);
+          return;
+        }
+      } catch {
+        // network/404 falls through to the seeded fallback below
+      }
+
+      // Last resort: if the username matches a seeded leaderboard
+      // entry, show a synthetic profile. Real users that don't
+      // exist (typos in URLs) get the "not found" empty state.
       if (!cancelled) {
         setProfile(makeFallbackProfile(username));
         setMatches([]);
+        setUnlockedIds(new Set());
         setLoading(false);
       }
     })();
@@ -343,51 +437,46 @@ export function ProfileView({ username }: Props) {
 
           {tab === "achievements" ? (
             <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {FAKE_ACHIEVEMENTS.map((a) => (
-                <li
-                  key={a.id}
-                  className={`rounded-2xl border bg-gradient-to-br p-4 transition-all duration-200 hover:-translate-y-0.5 ${rarityClass(a.rarity)} ${
-                    a.unlocked ? "" : "opacity-60"
-                  }`}
-                >
-                  <div className="flex items-start gap-3">
-                    <span
-                      aria-hidden
-                      className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-black/40 text-2xl ${
-                        a.unlocked ? "" : "grayscale"
-                      }`}
-                    >
-                      {a.icon}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="text-sm font-bold text-white">
-                          {a.title}
-                        </div>
-                        <span className="text-[10px] uppercase tracking-widest text-gray-400">
-                          {rarityLabel(a.rarity)}
-                        </span>
-                      </div>
-                      <div className="mt-0.5 text-xs text-gray-400">
-                        {a.description}
-                      </div>
-                      {!a.unlocked && typeof a.progress === "number" && (
-                        <div className="mt-3">
-                          <ProgressBar value={a.progress} size="sm" />
-                          <div className="mt-1 text-right font-mono text-[10px] text-gray-400">
-                            {a.progress}%
+              {ACHIEVEMENT_CATALOG.map((a) => {
+                const unlocked = unlockedIds.has(a.id);
+                return (
+                  <li
+                    key={a.id}
+                    className={`rounded-2xl border bg-gradient-to-br p-4 transition-all duration-200 hover:-translate-y-0.5 ${rarityClass(a.rarity)} ${
+                      unlocked ? "" : "opacity-60"
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <span
+                        aria-hidden
+                        className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-black/40 text-2xl ${
+                          unlocked ? "" : "grayscale"
+                        }`}
+                      >
+                        {a.icon}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="text-sm font-bold text-white">
+                            {a.title}
                           </div>
+                          <span className="text-[10px] uppercase tracking-widest text-gray-400">
+                            {rarityLabel(a.rarity)}
+                          </span>
                         </div>
-                      )}
-                      {a.unlocked && (
-                        <div className="mt-2 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-emerald-300">
-                          ✓ Unlocked
+                        <div className="mt-0.5 text-xs text-gray-400">
+                          {a.description}
                         </div>
-                      )}
+                        {unlocked && (
+                          <div className="mt-2 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-emerald-300">
+                            ✓ Unlocked
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                </li>
-              ))}
+                  </li>
+                );
+              })}
             </ul>
           ) : (
             <ul className="divide-y divide-white/5 rounded-2xl border border-white/10 bg-white/5">

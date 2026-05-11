@@ -1,6 +1,7 @@
 "use client";
 
 import { db } from "./db";
+import type { AchievementRecord } from "./games/achievements-catalog";
 
 export type ClientMatchOutcome = {
   gameId: string;
@@ -19,6 +20,13 @@ export type ClientMatchOutcome = {
   inputs?: unknown;
 };
 
+export type MatchMilestones = {
+  tierPromoted: boolean;
+  leveledUp: boolean;
+  newStreakRecord: boolean;
+  firstWinEver: boolean;
+};
+
 export type RecordedMatch = {
   source: "server" | "local";
   reward: { lpDelta: number; xpGained: number };
@@ -32,6 +40,10 @@ export type RecordedMatch = {
     wins: number;
     losses: number;
   } | null;
+  // Set on server source only. The local-fallback path has no DB,
+  // so milestones can't be computed there.
+  milestones: MatchMilestones | null;
+  achievementsUnlocked: AchievementRecord[];
 };
 
 /**
@@ -68,6 +80,8 @@ export async function recordSoloMatchOutcome(
             ok: true;
             reward: { lpDelta: number; xpGained: number };
             profile: RecordedMatch["profile"];
+            milestones: MatchMilestones | null;
+            achievementsUnlocked: AchievementRecord[];
           }
         | null;
       if (data?.ok) {
@@ -75,6 +89,8 @@ export async function recordSoloMatchOutcome(
           source: "server",
           reward: data.reward,
           profile: data.profile,
+          milestones: data.milestones ?? null,
+          achievementsUnlocked: data.achievementsUnlocked ?? [],
         };
       }
     }
@@ -117,5 +133,7 @@ export async function recordSoloMatchOutcome(
       xpGained: fallback.optimisticXpGained,
     },
     profile: null,
+    milestones: null,
+    achievementsUnlocked: [],
   };
 }

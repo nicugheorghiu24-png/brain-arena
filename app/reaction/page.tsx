@@ -13,9 +13,15 @@ import { useDuelScore } from "../games/hooks/useDuelScore";
 import { computeReward } from "../games/reward";
 import { getGame } from "../games/registry";
 import type { RewardSummary } from "../games/types";
+import type { AchievementRecord } from "../lib/games/achievements-catalog";
 import { createMatchSeed } from "../games/match";
 import { resolveSeenUserId } from "../games/questions";
-import { recordSoloMatchOutcome } from "../lib/matchClient";
+import { recordSoloMatchOutcome, type MatchMilestones } from "../lib/matchClient";
+
+// A single round, recorded for server-side replay validation.
+// rt is the player's reaction time in ms, or -1 on a false start.
+// botRt is what the player needed to beat.
+type ReactionRoundInput = { rt: number; botRt: number };
 
 const GAME_ID = "reaction";
 const TOTAL_ROUNDS = 5;
@@ -50,7 +56,15 @@ export default function ReactionPage() {
   const [startedAt] = useState<number>(() => Date.now());
   const [reward, setReward] = useState<RewardSummary | null>(null);
   const [matchSeed, setMatchSeed] = useState<number>(0);
+  const [milestones, setMilestones] = useState<MatchMilestones | null>(null);
+  const [achievementsUnlocked, setAchievementsUnlocked] = useState<
+    AchievementRecord[]
+  >([]);
   const resultFiredRef = useRef<boolean>(false);
+
+  // Replay-validation input stream. Each resolved round (including
+  // false starts) is appended here as { rt, botRt }.
+  const roundsRef = useRef<ReactionRoundInput[]>([]);
 
   // Match seed for record-keeping (this game doesn't use seeded
   // questions). Generated client-side once.
@@ -117,6 +131,14 @@ export default function ReactionPage() {
       } else {
         winner = "draw";
       }
+      // Record for replay validation. False starts use rt=-1 and the
+      // validator excludes them from the score count. The bot's rt is
+      // 0 on a false start (we never measured it) — the validator
+      // ignores botRt when rt===-1.
+      roundsRef.current.push({
+        rt: playerRt as number,
+        botRt: playerRt === FALSE_START_RT ? 0 : (botRt as number),
+      });
       setHistory((h) => [...h, winner]);
       if (winner === "you") scoreSelf();
       else if (winner === "opp" || winner === "false-start") scoreOpponent();
@@ -177,6 +199,7 @@ export default function ReactionPage() {
           scoreOpponent: score.opponent,
           opponentName: OPPONENT_NAME,
           matchSeed,
+          inputs: { rounds: roundsRef.current },
         },
         {
           userId,
@@ -189,8 +212,10 @@ export default function ReactionPage() {
       setReward({
         lpDelta: recorded.reward.lpDelta,
         xpGained: recorded.reward.xpGained,
-        levelUp: false,
+        levelUp: recorded.milestones?.leveledUp ?? false,
       });
+      setMilestones(recorded.milestones);
+      setAchievementsUnlocked(recorded.achievementsUnlocked);
     }, 0);
     return () => clearTimeout(id);
   }, [
@@ -239,6 +264,8 @@ export default function ReactionPage() {
           opponentName={OPPONENT_NAME}
           score={score}
           reward={reward ?? undefined}
+          milestones={milestones}
+          achievementsUnlocked={achievementsUnlocked}
         />
       </main>
     );

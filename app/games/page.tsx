@@ -1,11 +1,13 @@
 import { listGames } from "./registry";
 import { GameTile } from "../components/games/GameTile";
+import { FirstVisitOverlay } from "./components/FirstVisitOverlay";
 
 export default function GamesPage() {
   const games = listGames();
 
   return (
     <main className="page-enter app-aurora min-h-[calc(100vh-4rem)] bg-gradient-to-br from-black via-slate-950 to-cyan-950 px-4 py-8 text-white sm:px-6 sm:py-10">
+      <FirstVisitOverlay />
       <div className="mx-auto max-w-6xl space-y-10">
         <header className="text-center">
           <p className="text-xs uppercase tracking-widest text-cyan-300/70">

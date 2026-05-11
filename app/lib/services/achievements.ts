@@ -1,99 +1,14 @@
 import type { Profile } from "@prisma/client";
 import { requirePrisma } from "../prisma";
+import {
+  ACHIEVEMENT_CATALOG,
+  type AchievementRecord,
+} from "../games/achievements-catalog";
 
-export type AchievementRecord = {
-  id: string;
-  title: string;
-  description: string;
-  icon: string;
-  rarity: "common" | "rare" | "epic" | "legendary";
-};
-
-/**
- * The canonical achievement catalog. Single source of truth in code;
- * mirrored into the `achievements` table on first /api/matches POST
- * via ensureAchievementCatalog(). Adding a new achievement is a
- * matter of appending here + adding a corresponding check in
- * unlockAchievementsForOutcome.
- *
- * Rarity is a UX hint — the colour of the badge — not a balance lever.
- */
-export const ACHIEVEMENT_CATALOG: readonly AchievementRecord[] = [
-  // Onboarding
-  {
-    id: "first_win",
-    title: "First Blood",
-    description: "Win your very first match.",
-    icon: "🎯",
-    rarity: "common",
-  },
-  // Streaks
-  {
-    id: "streak_3",
-    title: "Hot Streak",
-    description: "Win 3 matches in a row.",
-    icon: "🔥",
-    rarity: "common",
-  },
-  {
-    id: "streak_5",
-    title: "On Fire",
-    description: "Win 5 matches in a row.",
-    icon: "🔥🔥",
-    rarity: "rare",
-  },
-  {
-    id: "streak_10",
-    title: "Unstoppable",
-    description: "Win 10 matches in a row.",
-    icon: "⚡",
-    rarity: "epic",
-  },
-  // Volume
-  {
-    id: "played_10",
-    title: "Getting Warm",
-    description: "Play 10 matches.",
-    icon: "🎮",
-    rarity: "common",
-  },
-  {
-    id: "played_50",
-    title: "Veteran",
-    description: "Play 50 matches.",
-    icon: "🎖️",
-    rarity: "rare",
-  },
-  // Tier promotions
-  {
-    id: "tier_silver",
-    title: "Silver Climb",
-    description: "Reach Silver tier.",
-    icon: "🥈",
-    rarity: "common",
-  },
-  {
-    id: "tier_gold",
-    title: "Gold Standard",
-    description: "Reach Gold tier.",
-    icon: "🥇",
-    rarity: "rare",
-  },
-  {
-    id: "tier_platinum",
-    title: "Platinum Mind",
-    description: "Reach Platinum tier.",
-    icon: "💎",
-    rarity: "epic",
-  },
-  {
-    id: "tier_diamond",
-    title: "Diamond Brain",
-    description: "Reach Diamond tier.",
-    icon: "💠",
-    rarity: "legendary",
-  },
-] as const;
+// Re-export so existing call sites in this file's module (and any
+// server-only consumer that already imported from here) keep working.
+export { ACHIEVEMENT_CATALOG };
+export type { AchievementRecord };
 
 /** Ordered tier rank — used for "promoted to" detection. */
 const TIER_RANK: Record<string, number> = {

@@ -4,7 +4,7 @@ import { Server as SocketIOServer, Socket } from "socket.io";
 import { Chess } from "chess.js";
 import { isDbConfigured, requirePrisma } from "./prisma";
 import { rankingsService } from "./services/rankings";
-import { achievementsService } from "./services/achievements";
+import { unlockAchievementsForOutcome } from "./services/achievements";
 
 /**
  * Cryptographically random 53-bit BigInt for shared match seeds. We cap
@@ -658,6 +658,22 @@ class MatchmakingQueue {
 
     const whiteProfile = await prisma.profile.findUnique({ where: { userId: white.userId } });
     const blackProfile = await prisma.profile.findUnique({ where: { userId: black.userId } });
+    // Per-side milestone + achievement payloads, filled in after the
+    // ranking update applies. Two players → two distinct ResultScreen
+    // experiences from the same match_end socket emit.
+    type MatchEndMilestones = {
+      tierPromoted: boolean;
+      leveledUp: boolean;
+      newStreakRecord: boolean;
+      firstWinEver: boolean;
+    };
+    type MatchEndAchievements = Awaited<
+      ReturnType<typeof unlockAchievementsForOutcome>
+    >;
+    let whiteMilestones: MatchEndMilestones | null = null;
+    let blackMilestones: MatchEndMilestones | null = null;
+    let whiteAchievements: MatchEndAchievements = [];
+    let blackAchievements: MatchEndAchievements = [];
     if (whiteProfile && blackProfile) {
       const whiteRank = await rankingsService.updatePlayerRank(
         white.userId,
@@ -712,10 +728,51 @@ class MatchmakingQueue {
         where: { matchId: match.id, userId: black.userId },
         data: { lpDelta: blackRank.lpDelta, xpGained: blackRank.xpGained },
       });
-    }
 
-    await achievementsService.unlockIfExists(white.userId, "chess_checkmate");
-    await achievementsService.unlockIfExists(black.userId, "chess_participant");
+      // Per-player milestones + achievements. Both rely on the AFTER
+      // state of each profile, which updatePlayerRank just wrote, so
+      // re-read those rows for the auto-awarder + the milestone diff.
+      const whiteAfter = await prisma.profile.findUnique({
+        where: { userId: white.userId },
+      });
+      const blackAfter = await prisma.profile.findUnique({
+        where: { userId: black.userId },
+      });
+      if (whiteAfter) {
+        whiteMilestones = {
+          tierPromoted:
+            whiteAfter.tier !== whiteProfile.tier ||
+            whiteAfter.division !== whiteProfile.division,
+          leveledUp: whiteAfter.level > whiteProfile.level,
+          newStreakRecord: whiteAfter.bestStreak > whiteProfile.bestStreak,
+          firstWinEver: whiteResult === "win" && whiteProfile.wins === 0,
+        };
+        whiteAchievements = await unlockAchievementsForOutcome({
+          userId: white.userId,
+          gameId: "chess",
+          result: whiteResult as "win" | "loss" | "draw",
+          before: whiteProfile,
+          after: whiteAfter,
+        });
+      }
+      if (blackAfter) {
+        blackMilestones = {
+          tierPromoted:
+            blackAfter.tier !== blackProfile.tier ||
+            blackAfter.division !== blackProfile.division,
+          leveledUp: blackAfter.level > blackProfile.level,
+          newStreakRecord: blackAfter.bestStreak > blackProfile.bestStreak,
+          firstWinEver: blackResult === "win" && blackProfile.wins === 0,
+        };
+        blackAchievements = await unlockAchievementsForOutcome({
+          userId: black.userId,
+          gameId: "chess",
+          result: blackResult as "win" | "loss" | "draw",
+          before: blackProfile,
+          after: blackAfter,
+        });
+      }
+    }
 
     // Audit-only: log timing anomalies. Persisting these to a dedicated
     // table is a follow-up; for now stdout + a Match.id reference is
@@ -755,17 +812,30 @@ class MatchmakingQueue {
 
     const io = getIO();
     if (io) {
-      const resultPayload = {
+      const basePayload = {
         matchId: match.id,
         outcome: state.result,
         white: { userId: white.userId, username: white.username, result: whiteResult },
         black: { userId: black.userId, username: black.username, result: blackResult },
       };
+      // Each player gets their OWN milestones + freshly-unlocked
+      // achievements. Spectators get neither — they aren't ranked in
+      // this match.
+      const whitePayload = {
+        ...basePayload,
+        milestones: whiteMilestones,
+        achievementsUnlocked: whiteAchievements,
+      };
+      const blackPayload = {
+        ...basePayload,
+        milestones: blackMilestones,
+        achievementsUnlocked: blackAchievements,
+      };
       this.broadcastChessState(state);
-      io.to(white.socketId).emit("match_end", resultPayload);
-      io.to(black.socketId).emit("match_end", resultPayload);
+      io.to(white.socketId).emit("match_end", whitePayload);
+      io.to(black.socketId).emit("match_end", blackPayload);
       for (const spectator of state.spectators) {
-        io.to(spectator).emit("match_end", resultPayload);
+        io.to(spectator).emit("match_end", basePayload);
       }
     }
 
